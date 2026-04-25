@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EOYS Layout — Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Roboto Mono', monospace; font-size: 13px; color: #000; background: #fff; }
+    header { padding: 16px 24px; border-bottom: 1px solid #000; display: flex; align-items: center; gap: 24px; }
+    header h1 { font-size: 14px; font-weight: 400; text-transform: uppercase; letter-spacing: 0.1em; }
+    .tabs { display: flex; gap: 0; }
+    .tab-btn { padding: 8px 20px; border: 1px solid #000; border-right: none; background: #fff; cursor: pointer; font-family: inherit; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .tab-btn:last-child { border-right: 1px solid #000; }
+    .tab-btn.active { background: #000; color: #fff; }
+    main { padding: 24px; }
+    .tab-panel { display: none; }
+    .tab-panel.visible { display: block; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+    th, td { padding: 8px 12px; border: 1px solid #d0d0d0; text-align: left; font-size: 12px; vertical-align: middle; }
+    th { background: #f5f5f5; text-transform: uppercase; letter-spacing: 0.05em; font-size: 11px; }
+    tr:hover td { background: #fafafa; }
+    .btn { padding: 5px 12px; border: 1px solid #000; background: #fff; cursor: pointer; font-family: inherit; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .btn:hover { background: #f0f0f0; }
+    .btn.primary { background: #000; color: #fff; }
+    .btn.primary:hover { background: #333; }
+    .btn.green { background: rgb(0,255,0); border-color: #000; }
+    input, select, textarea { width: 100%; padding: 5px 8px; border: 1px solid #000; font-family: inherit; font-size: 12px; margin-bottom: 8px; }
+    label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 3px; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 8px; }
+    .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 8px; }
+    .upload-form { border: 1px solid #000; padding: 20px; margin-top: 20px; max-width: 600px; }
+    .upload-form h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 16px; }
+    .badge { padding: 2px 6px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .badge.pending { border: 1px solid #aaa; color: #666; }
+    .badge.approved { background: rgb(0,255,0); border: 1px solid #000; }
+    .toggle-row { display: flex; align-items: center; gap: 8px; }
+    .toggle-row input[type=checkbox] { width: auto; margin: 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>EOYS Layout — Admin</h1>
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="library">Asset Library</button>
+      <button class="tab-btn" data-tab="scans">Assets from Scans</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Tab 1: Asset Library -->
+    <div class="tab-panel visible" id="panel-library">
+      <button class="btn primary" id="toggle-upload">+ Upload New Asset</button>
+
+      <div class="upload-form" id="upload-form" style="display:none">
+        <h2>Upload Asset</h2>
+        <label>GLB / OBJ File</label>
+        <input type="file" id="up-file" accept=".glb,.obj" />
+        <div class="form-row">
+          <div>
+            <label>Name</label>
+            <input type="text" id="up-name" placeholder="Chair" />
+          </div>
+          <div>
+            <label>Category</label>
+            <select id="up-category">
+              <option value="furniture">Furniture</option>
+              <option value="projector">Projector</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+        </div>
+        <label>Description</label>
+        <input type="text" id="up-desc" placeholder="Optional" />
+        <label>Bounding Box (feet: W × D × H)</label>
+        <div class="form-row-3">
+          <input type="number" id="up-w" placeholder="W" step="0.5" min="0" />
+          <input type="number" id="up-d" placeholder="D" step="0.5" min="0" />
+          <input type="number" id="up-h" placeholder="H" step="0.5" min="0" />
+        </div>
+        <div class="toggle-row" style="margin-bottom:12px">
+          <input type="checkbox" id="up-global" />
+          <label style="display:inline;margin:0">Add to global asset library</label>
+        </div>
+        <button class="btn primary" id="up-submit">Upload</button>
+        <span id="up-status" style="margin-left:12px;font-size:11px"></span>
+      </div>
+
+      <table id="library-table">
+        <thead>
+          <tr>
+            <th>Name</th><th>Category</th><th>Source</th><th>Global</th><th>Status</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="library-body"></tbody>
+      </table>
+    </div>
+
+    <!-- Tab 2: Scan Objects -->
+    <div class="tab-panel" id="panel-scans">
+      <p style="font-size:11px;color:#666;margin-bottom:16px">
+        Objects extracted from Polycam scans. Fill in name and click "Add to Library" to approve.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Scan Name</th><th>Category</th><th>Bounding Box</th><th>Name</th><th>Global</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="scans-body"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script type="module">
+    // Tab switching
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'))
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('visible'))
+        btn.classList.add('active')
+        document.getElementById(`panel-${btn.dataset.tab}`).classList.add('visible')
+        if (btn.dataset.tab === 'scans') loadScans()
+      })
+    })
+
+    // Upload form toggle
+    document.getElementById('toggle-upload').addEventListener('click', () => {
+      const form = document.getElementById('upload-form')
+      form.style.display = form.style.display === 'none' ? 'block' : 'none'
+    })
+
+    // Load library
+    async function loadLibrary() {
+      const res = await fetch('/api/admin/assets')
+      const assets = await res.json()
+      const tbody = document.getElementById('library-body')
+      tbody.innerHTML = ''
+      for (const a of assets) {
+        const tr = document.createElement('tr')
+        tr.innerHTML = `
+          <td>${a.name}</td>
+          <td>${a.category || ''}</td>
+          <td>${a.source || ''}</td>
+          <td>${a.is_global ? '✓' : ''}</td>
+          <td><span class="badge ${a.approved ? 'approved' : 'pending'}">${a.approved ? 'Approved' : 'Pending'}</span></td>
+          <td>
+            ${!a.approved ? `<button class="btn green" data-id="${a.id}" data-action="approve">Approve</button>` : ''}
+            <button class="btn" data-id="${a.id}" data-action="toggle-global" style="margin-left:4px">
+              ${a.is_global ? 'Remove from Library' : 'Add to Library'}
+            </button>
+          </td>
+        `
+        tbody.appendChild(tr)
+      }
+
+      tbody.querySelectorAll('[data-action="approve"]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          await fetch(`/api/admin/assets/${btn.dataset.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ approved: true }),
+          })
+          loadLibrary()
+        })
+      })
+
+      tbody.querySelectorAll('[data-action="toggle-global"]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const asset = assets.find(a => a.id === btn.dataset.id)
+          await fetch(`/api/admin/assets/${btn.dataset.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_global: !asset.is_global }),
+          })
+          loadLibrary()
+        })
+      })
+    }
+
+    // Upload
+    document.getElementById('up-submit').addEventListener('click', async () => {
+      const file = document.getElementById('up-file').files[0]
+      if (!file) { alert('Select a file first.'); return }
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('name', document.getElementById('up-name').value || file.name)
+      fd.append('description', document.getElementById('up-desc').value)
+      fd.append('category', document.getElementById('up-category').value)
+      const w = parseFloat(document.getElementById('up-w').value) * 0.3048 || 0
+      const d = parseFloat(document.getElementById('up-d').value) * 0.3048 || 0
+      const h = parseFloat(document.getElementById('up-h').value) * 0.3048 || 0
+      fd.append('boundingBox', JSON.stringify({ min: [0,0,0], max: [w,h,d] }))
+      fd.append('isGlobal', document.getElementById('up-global').checked ? '1' : '0')
+
+      const status = document.getElementById('up-status')
+      status.textContent = 'Uploading…'
+      const res = await fetch('/api/admin/assets', { method: 'POST', body: fd })
+      if (res.ok) {
+        status.textContent = 'Uploaded! Pending approval.'
+        loadLibrary()
+      } else {
+        status.textContent = 'Upload failed.'
+      }
+    })
+
+    // Load scan objects (pending)
+    async function loadScans() {
+      const res = await fetch('/api/admin/assets')
+      const assets = await res.json()
+      const scans = assets.filter(a => a.source === 'scan' && !a.approved)
+      const tbody = document.getElementById('scans-body')
+      tbody.innerHTML = ''
+      for (const a of scans) {
+        const bbox = a.bounding_box ? JSON.parse(a.bounding_box) : null
+        const bboxStr = bbox
+          ? `${((bbox.max[0]-bbox.min[0])/0.3048).toFixed(1)}' × ${((bbox.max[2]-bbox.min[2])/0.3048).toFixed(1)}' × ${((bbox.max[1]-bbox.min[1])/0.3048).toFixed(1)}'`
+          : '—'
+        const tr = document.createElement('tr')
+        tr.innerHTML = `
+          <td style="font-size:11px">${a.name}</td>
+          <td>${a.category || ''}</td>
+          <td style="font-size:11px">${bboxStr}</td>
+          <td><input type="text" placeholder="Proper name" data-id="${a.id}" class="scan-name" value="${a.name}" style="margin:0" /></td>
+          <td><input type="checkbox" class="scan-global" data-id="${a.id}" /></td>
+          <td><button class="btn green" data-id="${a.id}" data-action="add-scan">Add to Library</button></td>
+        `
+        tbody.appendChild(tr)
+      }
+
+      tbody.querySelectorAll('[data-action="add-scan"]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const nameInput = tbody.querySelector(`.scan-name[data-id="${btn.dataset.id}"]`)
+          const globalInput = tbody.querySelector(`.scan-global[data-id="${btn.dataset.id}"]`)
+          const name = nameInput?.value?.trim()
+          if (!name) { nameInput?.focus(); return }
+          await fetch(`/api/admin/assets/${btn.dataset.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, approved: true, is_global: globalInput?.checked ? 1 : 0 }),
+          })
+          loadScans()
+        })
+      })
+    }
+
+    loadLibrary()
+  </script>
+</body>
+</html>

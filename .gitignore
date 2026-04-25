@@ -1,0 +1,9 @@
+.claude/
+utilities/
+.env
+node_modules/
+layout-generator/models/
+dist/
+*.DS_Store
+data/
+storage/

@@ -1,0 +1,13 @@
+{
+  "name": "layout-generator",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "process": "node process.js"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "^4.0.5",
+    "@gltf-transform/functions": "^4.0.5",
+    "adm-zip": "^0.5.10"
+  }
+}

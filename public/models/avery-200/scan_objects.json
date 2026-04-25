@@ -1,0 +1,40 @@
+[
+  {
+    "scanName": "television0",
+    "category": "television",
+    "boundingBox": {
+      "min": [
+        -1.9027570486068726,
+        0.001832399982959032,
+        -0.8615513443946838
+      ],
+      "max": [
+        -1.7905758619308472,
+        0.6685804128646851,
+        0.34694477915763855
+      ]
+    },
+    "approved": false,
+    "assetId": null,
+    "scanSource": "avery-200"
+  },
+  {
+    "scanName": "television1",
+    "category": "television",
+    "boundingBox": {
+      "min": [
+        1.6412558555603027,
+        0.009672779589891434,
+        -1.013914704322815
+      ],
+      "max": [
+        1.7412559986114502,
+        0.6339403986930847,
+        0.24731574952602386
+      ]
+    },
+    "approved": false,
+    "assetId": null,
+    "scanSource": "avery-200"
+  }
+]

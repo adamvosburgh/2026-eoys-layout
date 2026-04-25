@@ -1,0 +1,397 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 13px;
+  color: #000;
+  background: #fff;
+  overflow: hidden;
+  width: 100vw;
+  height: 100vh;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+}
+
+/* Top bar: room switcher + visibility toggles */
+#top-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  height: 40px;
+  background: #fff;
+  border-bottom: 1px solid #000;
+}
+
+/* Room switcher tabs */
+#room-switcher {
+  display: flex;
+  gap: 0;
+}
+
+.room-tab {
+  padding: 0 16px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  border: none;
+  border-right: 1px solid #000;
+  background: #fff;
+  cursor: pointer;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 13px;
+  color: #000;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.room-tab:first-child {
+  border-left: 1px solid #000;
+}
+
+.room-tab:hover {
+  background: #f0f0f0;
+}
+
+.room-tab.active {
+  background: #000;
+  color: #fff;
+}
+
+/* Visibility toggles */
+#visibility-toggles {
+  display: flex;
+  gap: 4px;
+}
+
+.vis-btn {
+  padding: 4px 10px;
+  border: 1px solid #000;
+  background: #fff;
+  cursor: pointer;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 11px;
+  color: #000;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.vis-btn:hover {
+  background: #f0f0f0;
+}
+
+.vis-btn.active {
+  background: #000;
+  color: #fff;
+}
+
+/* Scene canvas fills remaining space */
+#scene-container {
+  position: fixed;
+  top: 40px;
+  left: 0;
+  right: 280px;
+  bottom: 0;
+}
+
+#scene-container canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Right sidebar */
+#sidebar {
+  position: fixed;
+  top: 40px;
+  right: 0;
+  bottom: 0;
+  width: 280px;
+  display: flex;
+  border-left: 1px solid #000;
+  background: #fff;
+}
+
+#sidebar-icons {
+  width: 40px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #000;
+}
+
+.sidebar-icon-btn {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-bottom: 1px solid #000;
+  background: #fff;
+  cursor: pointer;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 10px;
+  color: #000;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
+  letter-spacing: 0.05em;
+}
+
+.sidebar-icon-btn:hover {
+  background: #f0f0f0;
+}
+
+.sidebar-icon-btn.active {
+  background: #000;
+  color: #fff;
+}
+
+#sidebar-panels {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.sidebar-panel {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.sidebar-panel.visible {
+  display: flex;
+}
+
+.panel-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #000;
+}
+
+/* Generic button style */
+.btn {
+  padding: 6px 12px;
+  border: 1px solid #000;
+  background: #fff;
+  cursor: pointer;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 12px;
+  color: #000;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn:hover {
+  background: #f0f0f0;
+}
+
+.btn.primary {
+  background: #000;
+  color: #fff;
+}
+
+.btn.primary:hover {
+  background: #333;
+}
+
+/* Asset list items */
+.asset-item {
+  padding: 8px;
+  border: 1px solid #d0d0d0;
+  margin-bottom: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.asset-item:hover {
+  border-color: rgb(0, 255, 0);
+  outline: 1px solid rgb(0, 255, 0);
+}
+
+.asset-item.projector-asset {
+  border-style: dashed;
+}
+
+.asset-name {
+  font-size: 12px;
+  flex: 1;
+}
+
+.asset-category {
+  font-size: 10px;
+  color: #666;
+  text-transform: uppercase;
+}
+
+/* Form inputs */
+input[type="text"],
+input[type="number"],
+textarea,
+select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #000;
+  background: #fff;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 12px;
+  color: #000;
+  outline: none;
+  margin-bottom: 8px;
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus,
+textarea:focus,
+select:focus {
+  outline: 2px solid rgb(0, 255, 0);
+  outline-offset: -2px;
+}
+
+label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: block;
+  margin-bottom: 4px;
+  color: #000;
+}
+
+/* Tooltip */
+.tooltip {
+  position: fixed;
+  background: #fff;
+  border: 1px solid #000;
+  padding: 4px 8px;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 11px;
+  pointer-events: none;
+  z-index: 500;
+  max-width: 220px;
+}
+
+/* Label dialog overlay */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.3);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dialog {
+  background: #fff;
+  border: 1px solid #000;
+  padding: 20px;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dialog h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 4px;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+/* User awareness cursors */
+.user-cursor-label {
+  position: absolute;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 10px;
+  background: rgb(0, 255, 0);
+  color: #000;
+  padding: 2px 4px;
+  pointer-events: none;
+  z-index: 50;
+}
+
+/* Create panel segments */
+.create-segment {
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #d0d0d0;
+}
+
+.create-segment:last-child {
+  border-bottom: none;
+}
+
+.dims-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+}
+
+.dims-row label {
+  font-size: 10px;
+}
+
+/* Draw panel mode buttons */
+.mode-btns {
+  display: flex;
+  gap: 0;
+  margin-bottom: 12px;
+}
+
+.mode-btn {
+  flex: 1;
+  padding: 6px;
+  border: 1px solid #000;
+  background: #fff;
+  cursor: pointer;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 11px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.mode-btn + .mode-btn {
+  border-left: none;
+}
+
+.mode-btn.active {
+  background: #000;
+  color: #fff;
+}
+
+/* Green highlight on selection */
+.selection-hint {
+  color: rgb(0, 255, 0);
+}
