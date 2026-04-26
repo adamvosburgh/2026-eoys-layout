@@ -38,7 +38,10 @@ export class DrawPanel {
   }
 
   deactivate() {
-    this._mode = null
-    this.el.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'))
+    if (this._mode) {
+      this._mode = null
+      this.el.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'))
+      this.onModeChange(null)
+    }
   }
 }

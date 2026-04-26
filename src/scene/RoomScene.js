@@ -2,6 +2,10 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 
+// Global camera starting frame (applied to every room load)
+const DEFAULT_CAM_POS    = [-1.458, 0.407, 0.136]
+const DEFAULT_CAM_TARGET = [-0.993, 0.337, 0.306]
+
 export class RoomScene {
   constructor(container) {
     this.container = container
@@ -34,21 +38,82 @@ export class RoomScene {
 
   _initCamera() {
     const { width, height } = this._size()
-    this.camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 200)
-    this.camera.position.set(8, 6, 8)
-    this.camera.lookAt(0, 0, 0)
+    this.camera = new THREE.PerspectiveCamera(50, width / height, 0.05, 200)
+    this.camera.layers.enable(1)
+    this.camera.position.set(...DEFAULT_CAM_POS)
+    this.camera.lookAt(...DEFAULT_CAM_TARGET)
   }
 
   _initControls() {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement)
     this.controls.enableDamping = true
-    this.controls.dampingFactor = 0.08
-    this.controls.minDistance = 0.5
-    this.controls.maxDistance = 100
+    this.controls.dampingFactor = 0.12
+    this.controls.minDistance = 0.1
+    this.controls.maxDistance = 30
+    // Tuned for small (room-scale, ~1m–10m) viewing
+    this.controls.rotateSpeed = 0.7
+    this.controls.panSpeed    = 0.8
+    this.controls.zoomSpeed   = 0.9
+    this.controls.zoomToCursor = true
+    // Default mouse mapping (LEFT=ROTATE, RIGHT=PAN, MIDDLE=DOLLY) is what we want.
+    // Mobile touch defaults: 1-finger=ROTATE, 2-finger=DOLLY+PAN.
+    this.controls.target.set(...DEFAULT_CAM_TARGET)
+    this.controls.update()
+  }
+
+  _initKeyboard() {
+    this._keys = new Set()
+    const onDown = e => {
+      // Ignore when typing in an input
+      const tag = (e.target.tagName || '').toLowerCase()
+      if (tag === 'input' || tag === 'textarea') return
+      this._keys.add(e.key.toLowerCase())
+    }
+    const onUp = e => this._keys.delete(e.key.toLowerCase())
+    window.addEventListener('keydown', onDown)
+    window.addEventListener('keyup',   onUp)
+    window.addEventListener('blur',  () => this._keys.clear())
+    this._lastFrameTime = performance.now()
+  }
+
+  _applyKeyboard() {
+    if (!this._keys || !this._keys.size) {
+      this._lastFrameTime = performance.now()
+      return
+    }
+    const now = performance.now()
+    const dt  = Math.min((now - this._lastFrameTime) / 1000, 0.1)
+    this._lastFrameTime = now
+
+    const k = this._keys
+    const baseSpeed = k.has('shift') ? 4.0 : 1.5  // m/s
+    const speed = baseSpeed * dt
+
+    const fwd = new THREE.Vector3()
+    this.camera.getWorldDirection(fwd)
+    fwd.y = 0
+    if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1)
+    fwd.normalize()
+    const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize()
+
+    const delta = new THREE.Vector3()
+    if (k.has('w') || k.has('arrowup'))    delta.add(fwd)
+    if (k.has('s') || k.has('arrowdown'))  delta.sub(fwd)
+    if (k.has('a') || k.has('arrowleft'))  delta.sub(right)
+    if (k.has('d') || k.has('arrowright')) delta.add(right)
+    if (k.has('q') || k.has(' '))          delta.y += 1
+    if (k.has('e'))                        delta.y -= 1
+
+    if (delta.lengthSq() === 0) return
+    delta.normalize().multiplyScalar(speed)
+    this.camera.position.add(delta)
+    this.controls.target.add(delta)
   }
 
   _startLoop() {
+    this._initKeyboard()
     this.renderer.setAnimationLoop(() => {
+      this._applyKeyboard()
       this.controls.update()
       if (this._onFrame) this._onFrame()
       this.renderer.render(this.scene, this.camera)
@@ -71,21 +136,11 @@ export class RoomScene {
     }
   }
 
-  focusRoom(meta) {
-    if (!meta) return
-    const bbox   = meta.boundingBox
-    const floorY = meta.floorY ?? bbox.min[1]
-    const cx     = (bbox.min[0] + bbox.max[0]) / 2
-    const cz     = (bbox.min[2] + bbox.max[2]) / 2
-    const span   = Math.max(bbox.max[0] - bbox.min[0], bbox.max[2] - bbox.min[2])
-
-    this.controls.target.set(cx, floorY, cz)
-    this.camera.position.set(
-      cx + span * 0.4,
-      floorY + span * 0.9,
-      cz + span * 0.65
-    )
-    this.camera.lookAt(cx, floorY, cz)
+  focusRoom(_meta) {
+    // Global starting frame — same for every room. Override per-room later if needed.
+    this.camera.position.set(...DEFAULT_CAM_POS)
+    this.controls.target.set(...DEFAULT_CAM_TARGET)
+    this.camera.lookAt(...DEFAULT_CAM_TARGET)
     this.controls.update()
   }
 

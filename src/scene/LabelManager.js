@@ -22,11 +22,12 @@ export class LabelManager {
     })
   }
 
-  add(id, position, name, description = '') {
+  add(id, position, name, description = '', onDelete = null) {
     if (this._labels.has(id)) this.remove(id)
 
     const div = document.createElement('div')
     div.style.cssText = `
+      position: relative;
       font-family: 'Roboto Mono', monospace;
       font-size: 11px;
       background: #fff;
@@ -35,7 +36,37 @@ export class LabelManager {
       pointer-events: none;
       white-space: nowrap;
     `
-    div.textContent = name
+
+    const text = document.createElement('span')
+    text.textContent = name
+    div.appendChild(text)
+
+    const xBtn = document.createElement('span')
+    xBtn.textContent = '×'
+    xBtn.title = 'Delete'
+    xBtn.style.cssText = `
+      position: absolute;
+      top: -8px;
+      right: -8px;
+      width: 14px;
+      height: 14px;
+      background: #fff;
+      border: 1px solid #000;
+      font-size: 11px;
+      line-height: 12px;
+      text-align: center;
+      pointer-events: auto;
+      cursor: pointer;
+      user-select: none;
+    `
+    xBtn.addEventListener('mousedown', e => { e.stopPropagation(); e.preventDefault() })
+    xBtn.addEventListener('click', e => {
+      e.stopPropagation()
+      e.preventDefault()
+      onDelete?.(id)
+    })
+    div.appendChild(xBtn)
+
     div.title = description
 
     const label = new CSS2DObject(div)
@@ -43,18 +74,15 @@ export class LabelManager {
     label.layers.set(1)
     this.scene.add(label)
 
-    this._labels.set(id, { label, div })
+    this._labels.set(id, { label, div, text })
     label.visible = this.visible
   }
 
   update(id, position, name, description = '') {
-    if (!this._labels.has(id)) {
-      this.add(id, position, name, description)
-      return
-    }
-    const { label, div } = this._labels.get(id)
+    if (!this._labels.has(id)) return
+    const { label, div, text } = this._labels.get(id)
     label.position.set(...position)
-    div.textContent = name
+    text.textContent = name
     div.title = description
   }
 

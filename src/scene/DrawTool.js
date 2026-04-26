@@ -1,5 +1,6 @@
 import * as THREE from 'three'
-import { snap } from './Snapping.js'
+import { SurfaceFrame, makeShapeDesc } from './SurfaceFrame.js'
+import { GRID_UNIT } from './Snapping.js'
 
 export class DrawTool {
   constructor(scene, camera, renderer, getRoomMeshes) {
@@ -7,12 +8,31 @@ export class DrawTool {
     this.camera = camera
     this.renderer = renderer
     this.getRoomMeshes = getRoomMeshes
-    this.mode = null // 'wall' | 'floor'
+    this.mode = null
     this.active = false
+    this.onShapeComplete = null
+    this.onSizeChange = null  // (w, h, mode, screenXY) — for live size label
 
     this._raycaster = new THREE.Raycaster()
-    this._startPoint = null
-    this._previewMesh = null
+    this._raycaster.layers.enableAll()
+
+    this._frame = null
+    this._startUV = null
+    this._endUV = null
+    this._lastEvent = null
+
+    const geo = new THREE.PlaneGeometry(1, 1)
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x00ff00,
+      transparent: true,
+      opacity: 0.25,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    })
+    this._previewMesh = new THREE.Mesh(geo, mat)
+    this._previewMesh.renderOrder = 3
+    this._previewMesh.visible = false
+    this.scene.add(this._previewMesh)
 
     this._onPointerDown = this._onPointerDown.bind(this)
     this._onPointerMove = this._onPointerMove.bind(this)
@@ -20,6 +40,7 @@ export class DrawTool {
   }
 
   enable(mode) {
+    if (this.active) { this.mode = mode; return }
     this.mode = mode
     this.active = true
     const el = this.renderer.domElement
@@ -29,9 +50,13 @@ export class DrawTool {
   }
 
   disable() {
+    if (!this.active) return
     this.active = false
     this.mode = null
-    this._removePreview()
+    this._frame = null
+    this._startUV = this._endUV = null
+    this._previewMesh.visible = false
+    this.onSizeChange?.(null, null, null, null)
     const el = this.renderer.domElement
     el.removeEventListener('pointerdown', this._onPointerDown)
     el.removeEventListener('pointermove', this._onPointerMove)
@@ -46,104 +71,89 @@ export class DrawTool {
     )
   }
 
-  _raycast(e) {
-    this._raycaster.setFromCamera(this._ndc(e), this.camera)
-    const meshes = this.getRoomMeshes()
-    const hits = this._raycaster.intersectObjects(meshes, false)
-    return hits.length ? hits[0] : null
-  }
-
   _onPointerDown(e) {
     if (e.button !== 0) return
-    const hit = this._raycast(e)
-    if (!hit) return
-    this._startPoint = hit.point.clone()
-    this._startNormal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld)
+    this._lastEvent = e
+    this._raycaster.setFromCamera(this._ndc(e), this.camera)
+    const hits = this._raycaster.intersectObjects(this.getRoomMeshes(), false)
+    if (!hits.length) return
+    const hit = hits[0]
+
+    const frame = new SurfaceFrame(hit)
+    if (this.mode === 'floor' && !frame.isFloor()) return
+    if (this.mode === 'wall'  &&  frame.isFloor()) return
+
+    this._frame = frame
+    const [u, v] = frame.to2D(frame.worldHit)
+    this._startUV = frame.snap2D(u, v)
+    this._endUV = this._startUV.slice()
+    this._renderPreview()
   }
 
   _onPointerMove(e) {
-    if (!this._startPoint) return
-    const hit = this._raycast(e)
-    if (!hit) return
-    this._updatePreview(this._startPoint, hit.point)
+    if (!this._frame) return
+    this._lastEvent = e
+    this._raycaster.setFromCamera(this._ndc(e), this.camera)
+    const hits = this._raycaster.intersectObject(this._frame.object, false)
+    if (!hits.length) return
+    const [u, v] = this._frame.to2D(hits[0].point)
+    this._endUV = this._frame.snap2D(u, v)
+    this._renderPreview()
   }
 
-  _onPointerUp(e) {
-    if (!this._startPoint) return
-    const hit = this._raycast(e)
-    if (hit) {
-      const endPoint = hit.point.clone()
-      const shape = this._computeShape(this._startPoint, endPoint)
-      if (shape && this.onShapeComplete) {
-        this.onShapeComplete(shape, this._startNormal, this.mode)
-      }
+  _onPointerUp() {
+    if (!this._frame || !this._startUV) {
+      this._previewMesh.visible = false
+      this.onSizeChange?.(null, null, null, null)
+      return
     }
-    this._startPoint = null
-    this._startNormal = null
-    this._removePreview()
+    const [u0, v0] = this._startUV
+    const [u1, v1] = this._endUV
+
+    if (Math.abs(u1 - u0) < GRID_UNIT * 0.5 && Math.abs(v1 - v0) < GRID_UNIT * 0.5) {
+      this._previewMesh.visible = false
+      this.onSizeChange?.(null, null, null, null)
+      this._frame = null
+      this._startUV = this._endUV = null
+      return
+    }
+
+    if (this.onShapeComplete) {
+      const desc = makeShapeDesc(this._frame, this.mode, u0, v0, u1, v1, 0)
+      this.onShapeComplete(desc)
+    }
+
+    this._previewMesh.visible = false
+    this.onSizeChange?.(null, null, null, null)
+    this._frame = null
+    this._startUV = this._endUV = null
   }
 
-  _computeShape(a, b) {
-    if (this.mode === 'floor') {
-      const minX = Math.min(a.x, b.x), maxX = Math.max(a.x, b.x)
-      const minZ = Math.min(a.z, b.z), maxZ = Math.max(a.z, b.z)
-      const w = snap(maxX - minX) || 0.1524
-      const d = snap(maxZ - minZ) || 0.1524
-      const cx = snap((minX + maxX) / 2)
-      const cz = snap((minZ + maxZ) / 2)
-      return { type: 'floor', w, d, h: 0, cx, cy: a.y + 0.005, cz }
-    } else {
-      // wall drawing — project onto wall plane
-      const w = snap(Math.abs(b.x - a.x) || Math.abs(b.z - a.z)) || 0.1524
-      const h = snap(Math.abs(b.y - a.y)) || 0.1524
-      const cy = snap((a.y + b.y) / 2)
-      return { type: 'wall', w, h, d: 0, cx: snap((a.x + b.x) / 2), cy, cz: snap((a.z + b.z) / 2), normal: this._startNormal }
+  _renderPreview() {
+    if (!this._frame || !this._startUV || !this._endUV) {
+      this._previewMesh.visible = false
+      return
     }
-  }
+    const f = this._frame
+    const [u0, v0] = this._startUV
+    const [u1, v1] = this._endUV
 
-  _updatePreview(a, b) {
-    this._removePreview()
-    const shape = this._computeShape(a, b)
-    if (!shape) return
+    const w = Math.max(Math.abs(u1 - u0), GRID_UNIT)
+    const h = Math.max(Math.abs(v1 - v0), GRID_UNIT)
+    const cu = (u0 + u1) / 2
+    const cv = (v0 + v1) / 2
 
-    let geo
-    if (shape.type === 'floor') {
-      geo = new THREE.PlaneGeometry(shape.w, shape.d)
-    } else {
-      geo = new THREE.PlaneGeometry(shape.w, shape.h)
-    }
+    const center = f.to3DWorld(cu, cv)
+    // Lift slightly off the surface to avoid z-fight
+    center.addScaledVector(f.worldNormal, 0.003)
 
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0x00ff00,
-      transparent: true,
-      opacity: 0.25,
-      side: THREE.DoubleSide,
-    })
-    this._previewMesh = new THREE.Mesh(geo, mat)
+    this._previewMesh.position.copy(center)
+    this._previewMesh.quaternion.copy(f.worldQuaternion())
+    this._previewMesh.scale.set(w, h, 1)
+    this._previewMesh.visible = true
 
-    if (shape.type === 'floor') {
-      this._previewMesh.rotation.x = -Math.PI / 2
-      this._previewMesh.position.set(shape.cx, shape.cy, shape.cz)
-    } else {
-      this._previewMesh.position.set(shape.cx, shape.cy, shape.cz)
-      if (shape.normal) {
-        this._previewMesh.lookAt(
-          shape.cx + shape.normal.x,
-          shape.cy + shape.normal.y,
-          shape.cz + shape.normal.z
-        )
-      }
-    }
-    this._previewMesh.layers.set(1)
-    this.scene.add(this._previewMesh)
-  }
-
-  _removePreview() {
-    if (this._previewMesh) {
-      this.scene.remove(this._previewMesh)
-      this._previewMesh.geometry.dispose()
-      this._previewMesh.material.dispose()
-      this._previewMesh = null
+    if (this.onSizeChange && this._lastEvent) {
+      this.onSizeChange(w, h, this.mode, [this._lastEvent.clientX, this._lastEvent.clientY])
     }
   }
 }

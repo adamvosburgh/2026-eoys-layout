@@ -5,11 +5,13 @@ import { v4 as uuidv4 } from 'uuid'
 import { RoomScene } from './scene/RoomScene.js'
 import { RoomLoader } from './scene/RoomLoader.js'
 import { Grid } from './scene/Grid.js'
-import { AssetObject } from './scene/AssetObject.js'
+import { AssetObject, SEL_MAT } from './scene/AssetObject.js'
+import { DrawnShape } from './scene/DrawnShape.js'
 import { DrawTool } from './scene/DrawTool.js'
 import { LabelManager } from './scene/LabelManager.js'
 import { Projector } from './scene/Projector.js'
-import { snap, GRID_UNIT } from './scene/Snapping.js'
+import { snap, GRID_UNIT, metersToFeetInches } from './scene/Snapping.js'
+import { SurfaceFrame } from './scene/SurfaceFrame.js'
 
 import { RoomSwitcher } from './ui/RoomSwitcher.js'
 import { Sidebar } from './ui/Sidebar.js'
@@ -28,7 +30,7 @@ import {
 
 const sceneContainer = document.getElementById('scene-container')
 const roomScene = new RoomScene(sceneContainer)
-const { scene, camera, renderer, controls, composer } = roomScene
+const { scene, camera, renderer, controls } = roomScene
 
 const roomLoader = new RoomLoader(scene)
 const grid = new Grid(scene)
@@ -37,8 +39,15 @@ const tooltip = new Tooltip()
 
 const gltfLoader = new GLTFLoader()
 
-// Active objects tracked locally: id → AssetObject | Projector
-const liveObjects = new Map()
+// Shared color refs — debug panel mutates these live
+const COLORS = {
+  drawnFloor: new THREE.Color(0xbbbbff),
+  drawnWall:  new THREE.Color(0xffbbbb),
+  primitive:  new THREE.Color(0xcccccc),
+  cursor:     new THREE.Color(0x00ff00),
+}
+
+const liveObjects = new Map()  // id → AssetObject | DrawnShape | Projector
 
 let currentMeta = null
 let drawTool = null
@@ -47,35 +56,29 @@ let drawMode = null
 // ─── Rooms ──────────────────────────────────────────────────────────────────
 
 async function loadRoom(slug) {
-  // Disconnect old Yjs, clear scene objects
   disconnect()
-  for (const obj of liveObjects.values()) obj.dispose()
+  for (const obj of liveObjects.values()) obj.dispose?.()
   liveObjects.clear()
   labelManager._labels.forEach((_, id) => labelManager.remove(id))
+  selected = hovered = null
 
-  // Load meta first, then GLB (loader uses meta for ceiling detection)
   const meta = await fetch(`/models/${slug}/meta.json`).then(r => r.json())
   await roomLoader.load(slug)
   currentMeta = meta
 
-  grid.build() // grid lives in the shader — no geometry to build
+  const gridSurfaces = roomLoader.getAllRoomMeshes()
+    .filter(m => !m.name.toLowerCase().startsWith('door_'))
+  grid.build(gridSurfaces)
   roomScene.focusRoom(meta)
 
-  // Connect Yjs
   const { objectsMap, visibilityMap } = connect(slug)
-
-  // Observe scene objects
   objectsMap.observe(() => syncObjectsFromYjs())
   syncObjectsFromYjs()
 
-  // Observe visibility
   visibilityMap.observe(e => {
-    e.changes.keys.forEach((_, key) => {
-      visToggles.sync(key, visibilityMap.get(key))
-    })
+    e.changes.keys.forEach((_, key) => visToggles.sync(key, visibilityMap.get(key)))
   })
 
-  // Awareness cursor rendering
   const awareness = getAwareness()
   awareness.on('change', () => renderAwarenessCursors(awareness))
 }
@@ -85,40 +88,63 @@ async function loadRoom(slug) {
 function syncObjectsFromYjs() {
   const objectsMap = getObjects()
   if (!objectsMap) return
-
   const liveIds = new Set(liveObjects.keys())
 
   objectsMap.forEach((ymap, id) => {
     liveIds.delete(id)
-    const pos = ymap.get('position') || [0, 0, 0]
-    const rot = ymap.get('rotation') || [0, 0, 0]
+    const type = ymap.get('type')
     const name = ymap.get('name') || ''
     const desc = ymap.get('description') || ''
-    const type = ymap.get('type')
+    const pos  = ymap.get('position') || [0, 0, 0]
+    const rot  = ymap.get('rotation') || [0, 0, 0]
 
     if (liveObjects.has(id)) {
-      // Update existing
       const obj = liveObjects.get(id)
-      if (obj instanceof Projector) {
+      if (obj instanceof DrawnShape) {
+        const g = ymap.get('geometry') || {}
+        if (g.centerWorld) obj.setCenterWorld(...g.centerWorld)
+        if ((g.extrude || 0) !== (obj.desc.extrude || 0)) obj.setExtrude(g.extrude || 0)
+        labelManager.update(id, labelPosFor(obj), name, desc)
+      } else if (obj instanceof Projector || obj instanceof AssetObject) {
         obj.setPosition(...pos)
         obj.setRotationY(rot[1])
-      } else if (obj instanceof AssetObject) {
-        obj.setPosition(...pos)
-        obj.setRotationY(rot[1])
+        labelManager.update(id, [pos[0], pos[1] + 0.3, pos[2]], name, desc)
       }
-      labelManager.update(id, [pos[0], pos[1] + 0.3, pos[2]], name, desc)
     } else {
-      // Create new
       spawnFromYjs(id, type, ymap, pos, rot, name, desc)
     }
   })
 
-  // Remove deleted
   for (const id of liveIds) {
-    liveObjects.get(id)?.dispose()
+    const obj = liveObjects.get(id)
+    if (obj === selected)  selected = null
+    if (obj === hovered)   hovered  = null
+    obj?.dispose?.()
     liveObjects.delete(id)
     labelManager.remove(id)
   }
+}
+
+function deleteObject(id) {
+  const obj = liveObjects.get(id)
+  if (obj) {
+    if (obj === selected) selected = null
+    if (obj === hovered)  hovered  = null
+    obj.dispose?.()
+    liveObjects.delete(id)
+  }
+  labelManager.remove(id)
+  removeObject(id)
+}
+
+function labelPosFor(obj) {
+  if (obj instanceof DrawnShape) {
+    const wp = obj.worldOrigin()
+    const out = obj.worldOutwardDir().multiplyScalar(0.05)
+    return [wp.x + out.x, wp.y + out.y + 0.05, wp.z + out.z]
+  }
+  const p = obj.group.position
+  return [p.x, p.y + 0.3, p.z]
 }
 
 function spawnFromYjs(id, type, ymap, pos, rot, name, desc) {
@@ -130,7 +156,11 @@ function spawnFromYjs(id, type, ymap, pos, rot, name, desc) {
     proj.setPosition(...pos)
     proj.setRotationY(rot[1])
     liveObjects.set(id, proj)
-  } else if (type === 'primitive') {
+    labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], name, desc, deleteObject)
+    return
+  }
+
+  if (type === 'primitive') {
     const geo = ymap.get('geometry') || { w: 0.6096, d: 0.6096, h: 0.9144 }
     const primType = ymap.get('primType') || 'box'
     const mesh = makePrimitiveMesh(primType, geo.w, geo.d, geo.h)
@@ -138,26 +168,32 @@ function spawnFromYjs(id, type, ymap, pos, rot, name, desc) {
     obj.setPosition(...pos)
     obj.setRotationY(rot[1])
     liveObjects.set(id, obj)
-  } else if (type === 'drawn') {
-    const geo = ymap.get('geometry') || {}
-    const mesh = makeDrawnMesh(geo)
-    if (mesh) {
-      const obj = new AssetObject({ id, type, name, desc, scene, mesh })
-      obj.group.position.set(...pos)
-      if (geo.normalDir) {
-        obj.group.lookAt(
-          pos[0] + geo.normalDir[0],
-          pos[1] + geo.normalDir[1],
-          pos[2] + geo.normalDir[2]
-        )
-      }
-      liveObjects.set(id, obj)
+    labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], name, desc, deleteObject)
+    return
+  }
+
+  if (type === 'drawn') {
+    const g = ymap.get('geometry') || {}
+    const parentMesh = roomLoader.getAllRoomMeshes().find(m => m.name === g.parentName) || null
+    const obj = new DrawnShape({ id, scene, desc: g, colorRefs: COLORS, parentMesh })
+    liveObjects.set(id, obj)
+    labelManager.add(id, labelPosFor(obj), name, desc, deleteObject)
+    if (id === pendingSelectId) {
+      pendingSelectId = null
+      if (selected) selected.deselect?.()
+      selected = obj
+      obj.select()
     }
-  } else if (type === 'label') {
-    // Labels are just CSS2D — no 3D mesh
+    return
+  }
+
+  if (type === 'label') {
     liveObjects.set(id, { dispose: () => {} })
-  } else if (type === 'asset') {
-    // GLB asset — load from file_path (provided by server)
+    labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], name, desc, deleteObject)
+    return
+  }
+
+  if (type === 'asset') {
     const filePath = ymap.get('filePath')
     if (filePath) {
       gltfLoader.loadAsync(filePath).then(gltf => {
@@ -167,93 +203,64 @@ function spawnFromYjs(id, type, ymap, pos, rot, name, desc) {
         obj.setPosition(...pos)
         obj.setRotationY(rot[1])
         liveObjects.set(id, obj)
-        labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], name, desc)
+        labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], name, desc, deleteObject)
       })
     }
     return
   }
-  labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], name, desc)
 }
 
 function makePrimitiveMesh(primType, w, d, h) {
   let geo
-  if (primType === 'cylinder') {
-    geo = new THREE.CylinderGeometry(w / 2, w / 2, h, 16)
-  } else if (primType === 'sphere') {
-    geo = new THREE.SphereGeometry(w / 2, 16, 12)
-  } else {
-    geo = new THREE.BoxGeometry(w, h, d)
-  }
-  const mat = new THREE.MeshLambertMaterial({ color: 0xcccccc })
+  if (primType === 'cylinder') geo = new THREE.CylinderGeometry(w / 2, w / 2, h, 16)
+  else if (primType === 'sphere') geo = new THREE.SphereGeometry(w / 2, 16, 12)
+  else geo = new THREE.BoxGeometry(w, h, d)
+  const mat = new THREE.MeshLambertMaterial({ color: COLORS.primitive.getHex() })
   const mesh = new THREE.Mesh(geo, mat)
   mesh.position.y = h / 2
   return mesh
-}
-
-function makeDrawnMesh(geo) {
-  if (geo.type === 'floor') {
-    const g = new THREE.BoxGeometry(geo.w, Math.max(geo.h || 0.01, 0.01), geo.d)
-    const m = new THREE.MeshLambertMaterial({ color: 0xbbbbff, transparent: true, opacity: 0.5 })
-    return new THREE.Mesh(g, m)
-  } else if (geo.type === 'wall') {
-    const g = new THREE.BoxGeometry(geo.w, geo.h, Math.max(geo.d || 0.01, 0.01))
-    const m = new THREE.MeshLambertMaterial({ color: 0xffbbbb, transparent: true, opacity: 0.5 })
-    return new THREE.Mesh(g, m)
-  }
-  return null
 }
 
 // ─── Placing Objects ─────────────────────────────────────────────────────────
 
 function placeAsset(asset) {
   const id = uuidv4()
-  const pos = [
-    snap(camera.position.x),
-    0,
-    snap(camera.position.z),
-  ]
-  const fields = {
+  upsertObject(id, {
     type: asset.category === 'projector' ? 'projector' : 'asset',
     assetId: asset.id,
     filePath: asset.file_path ? `/api/asset-file/${asset.id}` : null,
     name: asset.name,
     description: asset.description || '',
-    position: pos,
+    position: [snap(camera.position.x), 0, snap(camera.position.z)],
     rotation: [0, 0, 0],
     createdBy: getAwareness()?.clientID?.toString() || '',
-  }
-  upsertObject(id, fields)
+  })
 }
 
 function placePrimitive({ primType, w, d, h }) {
   promptLabel(name => {
-    const id = uuidv4()
-    const pos = [0, 0, 0]
-    upsertObject(id, {
+    upsertObject(uuidv4(), {
       type: 'primitive',
       primType,
       geometry: { w, d, h },
-      name,
-      description: '',
-      position: pos,
-      rotation: [0, 0, 0],
+      name, description: '',
+      position: [0, 0, 0], rotation: [0, 0, 0],
       createdBy: getAwareness()?.clientID?.toString() || '',
     })
   })
 }
 
-function placeDrawnShape(shape, normal, mode) {
+let pendingSelectId = null
+
+function placeDrawnShape(desc) {
   promptLabel(name => {
     const id = uuidv4()
-    const pos = [shape.cx, shape.cy, shape.cz]
-    const normalDir = normal ? [normal.x, normal.y, normal.z] : [0, 1, 0]
+    pendingSelectId = id
     upsertObject(id, {
       type: 'drawn',
-      geometry: { ...shape, normalDir },
-      name,
-      description: '',
-      position: pos,
-      rotation: [0, 0, 0],
+      geometry: desc,
+      name, description: '',
+      position: [0, 0, 0], rotation: [0, 0, 0],
       createdBy: getAwareness()?.clientID?.toString() || '',
     })
   })
@@ -279,102 +286,26 @@ function promptLabel(onConfirm) {
   `
   document.body.appendChild(overlay)
   overlay.querySelector('#dlg-name').focus()
-
   const close = () => document.body.removeChild(overlay)
   overlay.querySelector('#dlg-cancel').addEventListener('click', close)
   overlay.querySelector('#dlg-ok').addEventListener('click', () => {
     const name = overlay.querySelector('#dlg-name').value.trim()
-    if (!name) {
-      overlay.querySelector('#dlg-name').focus()
-      return
-    }
+    if (!name) { overlay.querySelector('#dlg-name').focus(); return }
     close()
     onConfirm(name)
   })
 }
 
-// ─── Interaction (drag, select, delete) ─────────────────────────────────────
+// ─── Interaction ─────────────────────────────────────────────────────────────
 
 let selected = null
-let dragging = false
-let dragFloorY = 0
+let hovered  = null
+let dragging = false        // moving an object
+let extruding = null        // { shape, initialOffset, initialExtrude }
+let dragSurface = null      // for non-drawn assets: { plane, y } for floor-plane drag
 const raycaster = new THREE.Raycaster()
+raycaster.layers.enableAll()
 const mouse = new THREE.Vector2()
-const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
-
-renderer.domElement.addEventListener('pointerdown', e => {
-  if (e.button !== 0) return
-  if (drawMode) return
-  setMouse(e)
-  raycaster.setFromCamera(mouse, camera)
-
-  // Test layout objects
-  const candidates = []
-  for (const [id, obj] of liveObjects) {
-    const group = obj.group || obj._group
-    if (group) {
-      const hits = raycaster.intersectObject(group, true)
-      if (hits.length) candidates.push({ id, obj, dist: hits[0].distance })
-    }
-  }
-  candidates.sort((a, b) => a.dist - b.dist)
-
-  if (candidates.length) {
-    const { id, obj } = candidates[0]
-    if (selected && selected !== obj) selected.deselect?.()
-    selected = obj
-    obj.select?.()
-    dragging = true
-    controls.enabled = false
-
-    // Compute floor Y for drag plane
-    const group = obj.group || obj
-    dragFloorY = group.position?.y || 0
-    floorPlane.constant = -dragFloorY
-  } else {
-    selected?.deselect?.()
-    selected = null
-  }
-})
-
-renderer.domElement.addEventListener('pointermove', e => {
-  if (!dragging || !selected) return
-  setMouse(e)
-  raycaster.setFromCamera(mouse, camera)
-  const pt = new THREE.Vector3()
-  if (raycaster.ray.intersectPlane(floorPlane, pt)) {
-    const group = selected.group || selected
-    if (!group) return
-    const id = group.userData?.assetObjectId
-    if (!id) return
-    const pos = [snap(pt.x), dragFloorY, snap(pt.z)]
-    if (selected.setPosition) selected.setPosition(...pos)
-    upsertObject(id, { position: pos })
-  }
-
-  // Projector tooltip on hover
-  checkProjectorTooltip(e)
-})
-
-renderer.domElement.addEventListener('pointerup', () => {
-  dragging = false
-  controls.enabled = !drawMode
-})
-
-renderer.domElement.addEventListener('contextmenu', e => {
-  e.preventDefault()
-  if (!selected) return
-  const group = selected.group || selected
-  const id = group?.userData?.assetObjectId
-  if (!id) return
-  if (confirm('Delete this object?')) {
-    selected.dispose?.()
-    liveObjects.delete(id)
-    labelManager.remove(id)
-    removeObject(id)
-    selected = null
-  }
-})
 
 function setMouse(e) {
   const rect = renderer.domElement.getBoundingClientRect()
@@ -382,7 +313,202 @@ function setMouse(e) {
   mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
 }
 
-// ─── Projector tooltip ────────────────────────────────────────────────────────
+/** Raycast all selectable user objects (groups), return closest hit (with obj). */
+function pickUserObject() {
+  let best = null
+  for (const [id, obj] of liveObjects) {
+    const group = obj.group
+    if (!group || !group.visible) continue
+    const hits = raycaster.intersectObject(group, true)
+    if (!hits.length) continue
+    const h = hits[0]
+    if (!best || h.distance < best.dist) best = { id, obj, dist: h.distance, hit: h }
+  }
+  return best
+}
+
+renderer.domElement.addEventListener('pointerdown', e => {
+  if (e.button !== 0) return
+  if (drawMode) return
+  setMouse(e)
+  raycaster.setFromCamera(mouse, camera)
+
+  const pick = pickUserObject()
+  if (!pick) {
+    if (selected) { selected.deselect?.(); selected = null }
+    return
+  }
+
+  // Extrude handle?
+  if (pick.hit.object.userData?.isExtrudeHandle) {
+    const target = liveObjects.get(pick.hit.object.userData.targetId)
+    if (target instanceof DrawnShape) {
+      const t0 = projectRayOntoOutwardLine(target)
+      if (t0 !== null) {
+        extruding = {
+          shape: target,
+          initialOffset: t0 - (target.desc.extrude || 0),
+        }
+        controls.enabled = false
+        return
+      }
+    }
+  }
+
+  // Regular select + drag
+  if (selected && selected !== pick.obj) selected.deselect?.()
+  selected = pick.obj
+  selected.select?.()
+
+  dragging = true
+  controls.enabled = false
+
+  // Set up drag plane for non-drawn assets
+  if (!(selected instanceof DrawnShape)) {
+    const y = (selected.group?.position?.y) || 0
+    dragSurface = { plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), y }
+  } else {
+    dragSurface = null
+  }
+})
+
+renderer.domElement.addEventListener('pointermove', e => {
+  setMouse(e)
+  raycaster.setFromCamera(mouse, camera)
+
+  // Grid hover (draw mode)
+  if (drawMode) {
+    const hits = raycaster.intersectObjects(roomLoader.getAllRoomMeshes(), false)
+    if (hits.length) grid.showHover(hits[0])
+    else             grid.hideHover()
+    return
+  }
+
+  // Extrude drag
+  if (extruding) {
+    const t = projectRayOntoOutwardLine(extruding.shape)
+    if (t !== null) {
+      const raw = t - extruding.initialOffset
+      const newExt = Math.max(Math.round(raw / GRID_UNIT) * GRID_UNIT, 0)
+      if (newExt !== extruding.shape.desc.extrude) {
+        extruding.shape.setExtrude(newExt)
+        labelManager.update(extruding.shape.id,
+          labelPosFor(extruding.shape),
+          ymapName(extruding.shape.id), '')
+        upsertObject(extruding.shape.id, { geometry: extruding.shape.desc })
+      }
+      sizeLabel.show(`extrude: ${metersToFeetInches(extruding.shape.desc.extrude)}`, [e.clientX, e.clientY])
+    }
+    return
+  }
+
+  // Object drag
+  if (dragging && selected) {
+    if (selected instanceof DrawnShape) {
+      const parent = selected.parentMesh
+      if (!parent) return
+      const hits = raycaster.intersectObject(parent, false)
+      if (!hits.length) return
+
+      // Build a SurfaceFrame from this hit (world-space). Project the hit point
+      // onto (U, V), snap so the shape's MIN corner lands on a grid line —
+      // this preserves the rectangle's existing dimensions while snapping.
+      const f = new SurfaceFrame(hits[0])
+      const [u, v] = f.to2D(hits[0].point)
+      const w = selected.desc.width, h = selected.desc.height
+      const minU = Math.round((u - w / 2) / GRID_UNIT) * GRID_UNIT
+      const minV = Math.round((v - h / 2) / GRID_UNIT) * GRID_UNIT
+      const newCenter = f.to3DWorld(minU + w / 2, minV + h / 2)
+
+      const cw = selected.desc.centerWorld
+      if (cw[0] !== newCenter.x || cw[1] !== newCenter.y || cw[2] !== newCenter.z) {
+        selected.setCenterWorld(newCenter.x, newCenter.y, newCenter.z)
+        labelManager.update(selected.id, labelPosFor(selected), ymapName(selected.id), '')
+        upsertObject(selected.id, { geometry: selected.desc })
+      }
+    } else if (dragSurface) {
+      const pt = new THREE.Vector3()
+      if (raycaster.ray.intersectPlane(dragSurface.plane, pt)) {
+        const id = selected.group?.userData?.assetObjectId
+        if (id) {
+          const pos = [snap(pt.x), dragSurface.y, snap(pt.z)]
+          selected.setPosition?.(...pos)
+          labelManager.update(id, [pos[0], pos[1] + 0.3, pos[2]], ymapName(id), '')
+          upsertObject(id, { position: pos })
+        }
+      }
+    }
+    checkProjectorTooltip(e)
+    return
+  }
+
+  // Hover (no drag, no draw)
+  const pick = pickUserObject()
+  const newHover = pick?.obj || null
+  if (newHover !== hovered) {
+    if (hovered && hovered !== selected) hovered.hoverOff?.()
+    hovered = newHover
+    if (hovered && hovered !== selected) hovered.hoverOn?.()
+  }
+  // Cursor: special pointer over extrude handle, move pointer over body
+  if (pick?.hit?.object?.userData?.isExtrudeHandle) {
+    renderer.domElement.style.cursor = 'ns-resize'
+  } else if (pick) {
+    renderer.domElement.style.cursor = 'grab'
+  } else {
+    renderer.domElement.style.cursor = ''
+  }
+  checkProjectorTooltip(e)
+})
+
+renderer.domElement.addEventListener('pointerup', () => {
+  dragging = false
+  extruding = null
+  dragSurface = null
+  sizeLabel.hide()
+  controls.enabled = !drawMode
+})
+
+renderer.domElement.addEventListener('pointerleave', () => {
+  grid.hideHover()
+  if (hovered && hovered !== selected) { hovered.hoverOff?.(); hovered = null }
+})
+
+window.addEventListener('keydown', e => {
+  const tag = (e.target.tagName || '').toLowerCase()
+  if (tag === 'input' || tag === 'textarea') return
+  if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
+    const id = selected.group?.userData?.assetObjectId || selected.id
+    if (id) deleteObject(id)
+  }
+  if (e.key === 'Escape' && selected) {
+    selected.deselect?.()
+    selected = null
+  }
+})
+
+/** Distance along the shape's outward axis at which the mouse ray is closest. */
+function projectRayOntoOutwardLine(shape) {
+  const origin = shape.worldOrigin()
+  const dir = shape.worldOutwardDir().normalize()
+  const ro = raycaster.ray.origin
+  const rd = raycaster.ray.direction
+  const w  = ro.clone().sub(origin)
+  const a = rd.dot(rd)
+  const b = rd.dot(dir)
+  const c = dir.dot(dir)
+  const d = rd.dot(w)
+  const e = dir.dot(w)
+  const denom = a * c - b * b
+  if (Math.abs(denom) < 1e-6) return null
+  return (a * e - b * d) / denom
+}
+
+function ymapName(id) {
+  return getObjects()?.get(id)?.get('name') || ''
+}
+
+// ─── Projector tooltip ───────────────────────────────────────────────────────
 
 function checkProjectorTooltip(e) {
   setMouse(e)
@@ -406,7 +532,6 @@ const cursorDots = new Map()
 function renderAwarenessCursors(awareness) {
   const states = awareness.getStates()
   const seenIds = new Set()
-
   states.forEach((state, clientId) => {
     if (clientId === awareness.clientID) return
     const user = state.user
@@ -416,48 +541,64 @@ function renderAwarenessCursors(awareness) {
     let dot = cursorDots.get(clientId)
     if (!dot) {
       const geo = new THREE.SphereGeometry(0.05, 8, 6)
-      const mat = new THREE.MeshBasicMaterial({ color: user.color || 0x00ff00 })
+      const mat = new THREE.MeshBasicMaterial({ color: user.color || COLORS.cursor.getHex() })
       dot = new THREE.Mesh(geo, mat)
       dot.layers.set(1)
       scene.add(dot)
       cursorDots.set(clientId, dot)
     }
-
-    if (user.cursor) {
-      dot.position.set(...user.cursor)
-      dot.visible = true
-    } else {
-      dot.visible = false
-    }
+    if (user.cursor) { dot.position.set(...user.cursor); dot.visible = true }
+    else dot.visible = false
   })
-
-  // Remove departed clients
   for (const [id, dot] of cursorDots) {
-    if (!seenIds.has(id)) {
-      scene.remove(dot)
-      cursorDots.delete(id)
-    }
+    if (!seenIds.has(id)) { scene.remove(dot); cursorDots.delete(id) }
   }
 }
 
 // ─── Draw tool ───────────────────────────────────────────────────────────────
 
 function enableDrawMode(mode) {
-  drawMode = mode
+  if (drawMode === mode) return
   if (!drawTool) {
     drawTool = new DrawTool(scene, camera, renderer, () => roomLoader.getAllRoomMeshes())
-    drawTool.onShapeComplete = (shape, normal, mode) => {
-      placeDrawnShape(shape, normal, mode)
+    drawTool.onShapeComplete = desc => placeDrawnShape(desc)
+    drawTool.onSizeChange = (w, h, m, screenXY) => {
+      if (w == null) sizeLabel.hide()
+      else           sizeLabel.show(`${metersToFeetInches(w)} × ${metersToFeetInches(h)}`, screenXY)
     }
   }
+  drawTool.disable()
+  drawMode = mode
   if (mode) {
     drawTool.enable(mode)
     controls.enabled = false
   } else {
-    drawTool.disable()
     controls.enabled = true
+    grid.hideHover()
+    sizeLabel.hide()
   }
 }
+
+// ─── Size label overlay (used during draw + extrude) ─────────────────────────
+
+const sizeLabel = (() => {
+  const el = document.createElement('div')
+  el.style.cssText = `
+    position: fixed; pointer-events: none; z-index: 1000;
+    background: #000; color: #fff; padding: 3px 8px;
+    font-family: 'Roboto Mono', monospace; font-size: 11px;
+    transform: translate(12px, 12px); display: none; white-space: nowrap;
+  `
+  document.body.appendChild(el)
+  return {
+    show(text, xy) {
+      el.textContent = text
+      if (xy) { el.style.left = xy[0] + 'px'; el.style.top = xy[1] + 'px' }
+      el.style.display = 'block'
+    },
+    hide() { el.style.display = 'none' },
+  }
+})()
 
 // ─── UI wiring ────────────────────────────────────────────────────────────────
 
@@ -483,31 +624,23 @@ const createPanel = new CreatePanel(createPanelEl, ({ kind, primType, w, d, h, f
     const url = URL.createObjectURL(file)
     gltfLoader.loadAsync(url).then(gltf => {
       const mesh = gltf.scene
-      // Scale to fit bounding box
       const box = new THREE.Box3().setFromObject(mesh)
-      const size = new THREE.Vector3()
-      box.getSize(size)
+      const size = new THREE.Vector3(); box.getSize(size)
       const scale = Math.min(w / size.x, h / size.y, d / size.z)
       mesh.scale.setScalar(scale)
       mesh.layers.set(1)
-
       promptLabel(name => {
         const id = uuidv4()
-        // Session-only: don't sync GLB data — just position/name
         upsertObject(id, {
-          type: 'primitive',
-          primType: 'upload',
+          type: 'primitive', primType: 'upload',
           geometry: { w, d, h },
-          name,
-          description: '',
-          position: [0, 0, 0],
-          rotation: [0, 0, 0],
+          name, description: '',
+          position: [0, 0, 0], rotation: [0, 0, 0],
           createdBy: getAwareness()?.clientID?.toString() || '',
         })
-        // Spawn locally (session-only)
         const obj = new AssetObject({ id, type: 'primitive', name, description: '', scene, mesh })
         liveObjects.set(id, obj)
-        labelManager.add(id, [0, 0.3, 0], name)
+        labelManager.add(id, [0, 0.3, 0], name, '', deleteObject)
       })
     })
   }
@@ -516,7 +649,7 @@ sidebar.addPanel('create', 'Create', createPanelEl)
 
 const drawPanelEl = document.createElement('div')
 const drawPanel = new DrawPanel(drawPanelEl, mode => enableDrawMode(mode))
-sidebar.addPanel('draw', 'Draw', drawPanelEl)
+sidebar.addPanel('draw', 'Draw', drawPanelEl, () => drawPanel.deactivate())
 
 const visToggles = new VisibilityToggles(
   document.getElementById('visibility-toggles'),
@@ -532,12 +665,12 @@ const visToggles = new VisibilityToggles(
   }
 )
 
-// ─── Render loop label update ─────────────────────────────────────────────────
+// ─── Render loop label update + awareness cursor ─────────────────────────────
 
+const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
 roomScene.onFrame(() => {
   labelManager.render()
 
-  // Update awareness cursor position
   const awareness = getAwareness()
   if (awareness) {
     raycaster.setFromCamera(mouse, camera)
@@ -559,45 +692,124 @@ function buildDebugPanel() {
   panel.style.cssText = `
     position: fixed; bottom: 16px; left: 16px; z-index: 999;
     background: rgba(255,255,255,0.95); border: 1px solid #000;
-    padding: 12px 16px; font-family: 'Roboto Mono', monospace; font-size: 11px;
-    display: flex; flex-direction: column; gap: 6px; min-width: 260px;
+    font-family: 'Roboto Mono', monospace; font-size: 11px; min-width: 280px;
   `
+  const header = document.createElement('div')
+  header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid #000;cursor:pointer;user-select:none;'
+  header.innerHTML = `<span style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;">Colors</span><span id="dbg-toggle" style="font-size:10px;">[ − ]</span>`
+  panel.appendChild(header)
 
-  const title = document.createElement('div')
-  title.textContent = 'LIGHT DEBUG'
-  title.style.cssText = 'font-size:10px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;border-bottom:1px solid #000;padding-bottom:4px;'
-  panel.appendChild(title)
+  const body = document.createElement('div')
+  body.style.cssText = 'padding:10px 12px;display:flex;flex-direction:column;gap:6px;'
+  panel.appendChild(body)
 
-  function slider(label, min, max, step, getValue, setValue) {
-    const row = document.createElement('div')
-    row.style.cssText = 'display:flex;align-items:center;gap:8px;'
-    const lbl = document.createElement('span')
-    lbl.style.cssText = 'width:120px;flex-shrink:0;'
-    const val = document.createElement('span')
-    val.style.cssText = 'width:36px;text-align:right;'
-    const inp = document.createElement('input')
-    inp.type = 'range'
-    inp.min = min; inp.max = max; inp.step = step
-    inp.value = getValue()
-    inp.style.cssText = 'flex:1;cursor:pointer;'
-    val.textContent = Number(getValue()).toFixed(2)
-    inp.addEventListener('input', () => {
-      const v = parseFloat(inp.value)
-      setValue(v)
-      val.textContent = v.toFixed(2)
-    })
-    lbl.textContent = label
-    row.appendChild(lbl); row.appendChild(inp); row.appendChild(val)
-    panel.appendChild(row)
+  let collapsed = false
+  header.addEventListener('click', () => {
+    collapsed = !collapsed
+    body.style.display = collapsed ? 'none' : 'flex'
+    panel.querySelector('#dbg-toggle').textContent = collapsed ? '[ + ]' : '[ − ]'
+  })
+
+  const hexFromColor = c => '#' + c.getHexString()
+
+  function row(label, getHex, onChange) {
+    const r = document.createElement('div')
+    r.style.cssText = 'display:flex;align-items:center;gap:8px;'
+    const lbl = document.createElement('span'); lbl.style.cssText = 'flex:1;'; lbl.textContent = label
+    const code = document.createElement('span'); code.style.cssText = 'opacity:.6;font-size:10px;width:64px;text-align:right;'
+    const inp = document.createElement('input'); inp.type = 'color'; inp.value = getHex()
+    inp.style.cssText = 'width:32px;height:20px;border:1px solid #000;background:none;cursor:pointer;padding:0;'
+    code.textContent = inp.value
+    inp.addEventListener('input', () => { onChange(inp.value); code.textContent = inp.value })
+    r.appendChild(lbl); r.appendChild(code); r.appendChild(inp)
+    body.appendChild(r)
   }
 
-  slider('Exposure', 0, 2, 0.05, () => roomScene.renderer.toneMappingExposure, v => roomScene.renderer.toneMappingExposure = v)
+  row('Background',  () => hexFromColor(scene.background),                v => scene.background.set(v))
+  row('Grid stroke', () => hexFromColor(grid._mat.uniforms.uColor.value),  v => grid._mat.uniforms.uColor.value.set(v))
+  row('Grid hover',  () => hexFromColor(grid._hoverMat.color),             v => grid._hoverMat.color.set(v))
+  row('Selection',   () => hexFromColor(SEL_MAT.color),                    v => SEL_MAT.color.set(v))
+  row('Cursor',      () => hexFromColor(COLORS.cursor),                    v => {
+    COLORS.cursor.set(v)
+    for (const dot of cursorDots.values()) dot.material.color.set(v)
+  })
+  row('Drawn — Floor', () => hexFromColor(COLORS.drawnFloor), v => COLORS.drawnFloor.set(v))
+  row('Drawn — Wall',  () => hexFromColor(COLORS.drawnWall),  v => COLORS.drawnWall.set(v))
+  row('Primitive',     () => hexFromColor(COLORS.primitive),  v => COLORS.primitive.set(v))
 
-  const close = document.createElement('button')
-  close.textContent = 'close'
-  close.style.cssText = 'margin-top:6px;border:1px solid #000;background:#fff;cursor:pointer;font-family:inherit;font-size:10px;padding:2px 8px;text-transform:uppercase;letter-spacing:.05em;align-self:flex-end;'
-  close.addEventListener('click', () => panel.remove())
-  panel.appendChild(close)
+  const note = document.createElement('div')
+  note.style.cssText = 'margin-top:6px;font-size:9px;opacity:.55;line-height:1.4;'
+  note.textContent = 'Drawn/Primitive: applies to NEW objects only.'
+  body.appendChild(note)
+
+  // Camera section
+  const camHeader = document.createElement('div')
+  camHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-top:1px solid #000;border-bottom:1px solid #000;cursor:pointer;user-select:none;'
+  camHeader.innerHTML = `<span style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;">Camera</span><span id="cam-toggle" style="font-size:10px;">[ + ]</span>`
+  panel.appendChild(camHeader)
+
+  const camBody = document.createElement('div')
+  camBody.style.cssText = 'padding:10px 12px;display:none;flex-direction:column;gap:6px;'
+  panel.appendChild(camBody)
+
+  let camCollapsed = true
+  camHeader.addEventListener('click', () => {
+    camCollapsed = !camCollapsed
+    camBody.style.display = camCollapsed ? 'none' : 'flex'
+    panel.querySelector('#cam-toggle').textContent = camCollapsed ? '[ + ]' : '[ − ]'
+  })
+
+  function readout(label) {
+    const r = document.createElement('div')
+    r.style.cssText = 'display:flex;align-items:center;gap:8px;'
+    const lbl = document.createElement('span'); lbl.style.cssText = 'flex:0 0 50px;'; lbl.textContent = label
+    const val = document.createElement('span'); val.style.cssText = 'flex:1;font-size:10px;opacity:.8;'
+    r.appendChild(lbl); r.appendChild(val)
+    camBody.appendChild(r)
+    return val
+  }
+
+  const camPosOut    = readout('pos')
+  const camTargetOut = readout('target')
+  const camUpdate = () => {
+    const p = camera.position, t = controls.target
+    camPosOut.textContent    = `${p.x.toFixed(3)}, ${p.y.toFixed(3)}, ${p.z.toFixed(3)}`
+    camTargetOut.textContent = `${t.x.toFixed(3)}, ${t.y.toFixed(3)}, ${t.z.toFixed(3)}`
+  }
+  camUpdate()
+  controls.addEventListener('change', camUpdate)
+  // Also update on every frame so WASD movement is reflected
+  setInterval(camUpdate, 200)
+
+  const btnRow = document.createElement('div')
+  btnRow.style.cssText = 'display:flex;gap:6px;margin-top:4px;'
+  const copyBtn = document.createElement('button')
+  copyBtn.textContent = 'copy values'
+  copyBtn.style.cssText = 'flex:1;border:1px solid #000;background:#fff;cursor:pointer;font-family:inherit;font-size:10px;padding:4px 6px;text-transform:uppercase;letter-spacing:.05em;'
+  copyBtn.addEventListener('click', () => {
+    const p = camera.position, t = controls.target
+    navigator.clipboard?.writeText(
+      `position: [${p.x.toFixed(3)}, ${p.y.toFixed(3)}, ${p.z.toFixed(3)}]\ntarget:   [${t.x.toFixed(3)}, ${t.y.toFixed(3)}, ${t.z.toFixed(3)}]`
+    )
+    copyBtn.textContent = 'copied!'
+    setTimeout(() => copyBtn.textContent = 'copy values', 900)
+  })
+  btnRow.appendChild(copyBtn)
+  const logBtn = document.createElement('button')
+  logBtn.textContent = 'log'
+  logBtn.style.cssText = copyBtn.style.cssText
+  logBtn.addEventListener('click', () => {
+    const p = camera.position, t = controls.target
+    console.log('camera position:', [p.x, p.y, p.z], 'target:', [t.x, t.y, t.z])
+  })
+  btnRow.appendChild(logBtn)
+  camBody.appendChild(btnRow)
+
+  // Controls help
+  const help = document.createElement('div')
+  help.style.cssText = 'margin-top:8px;font-size:9px;opacity:.55;line-height:1.5;'
+  help.innerHTML = 'WASD/Arrows: move &nbsp; Q/Space: up &nbsp; E: down<br>Shift: faster &nbsp; LMB: orbit &nbsp; RMB: pan &nbsp; Wheel: zoom'
+  camBody.appendChild(help)
 
   document.body.appendChild(panel)
 }
@@ -612,7 +824,6 @@ async function init() {
       '<p style="padding:40px;font-family:monospace">No rooms found. Run the processing pipeline first.</p>'
     return
   }
-
   roomSwitcher.render(rooms)
   await loadRoom(rooms[0].slug)
   await assetPanel.refresh()

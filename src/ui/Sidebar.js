@@ -6,7 +6,7 @@ export class Sidebar {
     this._active = null
   }
 
-  addPanel(id, label, el) {
+  addPanel(id, label, el, onClose) {
     el.classList.add('sidebar-panel')
     el.id = `panel-${id}`
     this.panelsEl.appendChild(el)
@@ -18,7 +18,7 @@ export class Sidebar {
     btn.addEventListener('click', () => this.toggle(id))
     this.iconsEl.appendChild(btn)
 
-    this._panels.push({ id, el, btn })
+    this._panels.push({ id, el, btn, onClose })
   }
 
   toggle(id) {
@@ -40,6 +40,7 @@ export class Sidebar {
 
   _close() {
     for (const p of this._panels) {
+      if (p.el.classList.contains('visible')) p.onClose?.()
       p.el.classList.remove('visible')
       p.btn.classList.remove('active')
     }

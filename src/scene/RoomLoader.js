@@ -25,6 +25,9 @@ export class RoomLoader {
     root.traverse(child => { if (child.isMesh) meshes.push(child) })
 
     for (const child of meshes) {
+      if (!child.geometry.attributes.normal) {
+        child.geometry.computeVertexNormals()
+      }
       if (this._isCeiling(child)) { child.visible = false; continue }
 
       child.castShadow = true
