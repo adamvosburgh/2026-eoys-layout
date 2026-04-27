@@ -41,10 +41,11 @@ const gltfLoader = new GLTFLoader()
 
 // Shared color refs — debug panel mutates these live
 const COLORS = {
-  drawnFloor: new THREE.Color(0xbbbbff),
-  drawnWall:  new THREE.Color(0xffbbbb),
-  primitive:  new THREE.Color(0xcccccc),
-  cursor:     new THREE.Color(0x00ff00),
+  drawnFloor:  new THREE.Color(0xbbbbff),
+  drawnWall:   new THREE.Color(0xffbbbb),
+  primitive:   new THREE.Color(0xcccccc),
+  cursor:      new THREE.Color(0x00ff00),
+  projSurface: new THREE.Color(0xfffde7),
 }
 
 const liveObjects = new Map()  // id → AssetObject | DrawnShape | Projector
@@ -110,7 +111,7 @@ function syncObjectsFromYjs() {
         labelManager.update(id, labelPosFor(obj), label, desc)
       } else if (obj instanceof Projector || obj instanceof AssetObject) {
         obj.setPosition(...pos)
-        obj instanceof AssetObject ? obj.setRotation(...rot) : obj.setRotationY(rot[1])
+        obj.setRotation ? obj.setRotation(...rot) : obj.setRotationY(rot[1])
         labelManager.update(id, [pos[0], pos[1] + 0.3, pos[2]], label, desc)
       }
     } else {
@@ -154,9 +155,12 @@ function spawnFromYjs(id, type, ymap, pos, rot, name, desc, creator = '') {
   const label = formatLabel(creator, name)
 
   if (type === 'projector') {
+    const filePath = ymap.get('filePath')
     const proj = new Projector({
       id, scene,
       getRoomMeshes: () => roomLoader.getAllRoomMeshes(),
+      filePath: filePath || null,
+      gltfLoader,
     })
     proj.setPosition(...pos)
     proj.setRotationY(rot[1])
@@ -296,7 +300,7 @@ function placeAsset(asset, worldPos) {
     assetId: asset.id,
     filePath: asset.file_path ? `/api/asset-file/${asset.id}` : null,
     boundingBox: bbox,
-    creator: asset.creator || '',
+    creator: asset.is_global ? '' : (asset.creator || ''),
     name: asset.name,
     description: asset.description || '',
     position: pos,
@@ -397,6 +401,12 @@ let hovered  = null
 let dragging = false        // moving an object
 let extruding = null        // { shape, initialOffset, initialExtrude }
 let rotating = null         // { obj, axis, center, lastAngle, accumulated, initX, initY, initZ }
+let translating = null      // { obj, axis, axisVec, dragPlane, startOffset, startPos }
+let hoveredGizmoHandle = null
+
+function setGizmoOpacity(handle, opacity) {
+  handle.traverse(c => { if (c.isMesh) { c.material.opacity = opacity } })
+}
 let dragSurface = null      // for non-drawn assets: { plane, y } for floor-plane drag
 const raycaster = new THREE.Raycaster()
 raycaster.layers.enableAll()
@@ -427,6 +437,15 @@ function getAngleOnAxis(axis, center) {
   }
 }
 
+/** Best drag plane for axis-constrained translation: contains the axis, faces camera. */
+function bestDragPlane(axisVec, center) {
+  const camToCenter = center.clone().sub(camera.position).normalize()
+  let n = camToCenter.clone().sub(axisVec.clone().multiplyScalar(camToCenter.dot(axisVec)))
+  if (n.lengthSq() < 1e-6) n.set(axisVec.x === 0 ? 1 : 0, axisVec.y === 0 ? 1 : 0, 0).normalize()
+  else n.normalize()
+  return new THREE.Plane().setFromNormalAndCoplanarPoint(n, center)
+}
+
 function wrapAngle(a) {
   while (a >  Math.PI) a -= 2 * Math.PI
   while (a < -Math.PI) a += 2 * Math.PI
@@ -453,13 +472,35 @@ renderer.domElement.addEventListener('pointerdown', e => {
   setMouse(e)
   raycaster.setFromCamera(mouse, camera)
 
-  // Rotate handles (only visible on selected object)
-  if (selected?._rotateHandles) {
-    for (const [axis, mesh] of Object.entries(selected._rotateHandles)) {
+  // Gizmo handles (only visible on selected object)
+  const gizmo = selected?._gizmo
+  if (gizmo) {
+    // Translate arrows (each axis has 2 arrow groups)
+    const AXES = { x: new THREE.Vector3(1,0,0), y: new THREE.Vector3(0,1,0), z: new THREE.Vector3(0,0,1) }
+    outer: for (const [axis, arrows] of Object.entries(gizmo.translateHandles)) {
+      for (const arrowGroup of arrows) {
+        if (!raycaster.intersectObject(arrowGroup, true).length) continue
+        const axisVec = AXES[axis]
+        const center = new THREE.Vector3()
+        new THREE.Box3().setFromObject(selected.group).getCenter(center)
+        const dragPlane = bestDragPlane(axisVec, center)
+        const pt = new THREE.Vector3()
+        raycaster.ray.intersectPlane(dragPlane, pt)
+        translating = {
+          obj: selected, axis, axisVec, dragPlane,
+          startOffset: pt ? pt.dot(axisVec) : 0,
+          startPos: selected.group.position.clone(),
+        }
+        controls.enabled = false
+        break outer
+      }
+    }
+    if (translating) return
+    // Rotate rings
+    for (const [axis, mesh] of Object.entries(gizmo.rotateHandles)) {
       if (!raycaster.intersectObject(mesh, false).length) continue
-      const box = new THREE.Box3().setFromObject(selected.group)
       const center = new THREE.Vector3()
-      box.getCenter(center)
+      new THREE.Box3().setFromObject(selected.group).getCenter(center)
       const angle = getAngleOnAxis(axis, center)
       if (angle !== null) {
         rotating = {
@@ -476,7 +517,7 @@ renderer.domElement.addEventListener('pointerdown', e => {
 
   const pick = pickUserObject()
   if (!pick) {
-    if (selected) { selected.deselect?.(); selected = null }
+    if (selected) { hoveredGizmoHandle = null; selected.deselect?.(); selected = null }
     return
   }
 
@@ -497,7 +538,10 @@ renderer.domElement.addEventListener('pointerdown', e => {
   }
 
   // Regular select + drag
-  if (selected && selected !== pick.obj) selected.deselect?.()
+  if (selected && selected !== pick.obj) {
+    hoveredGizmoHandle = null
+    selected.deselect?.()
+  }
   selected = pick.obj
   selected.select?.()
 
@@ -544,6 +588,23 @@ renderer.domElement.addEventListener('pointermove', e => {
     return
   }
 
+  // Translate drag (axis-constrained)
+  if (translating) {
+    const { obj, axis, axisVec, dragPlane, startOffset, startPos } = translating
+    const pt = new THREE.Vector3()
+    if (raycaster.ray.intersectPlane(dragPlane, pt)) {
+      const raw = pt.dot(axisVec) - startOffset
+      const snapped = Math.round(raw / GRID_UNIT) * GRID_UNIT
+      const newPos = startPos.clone().addScaledVector(axisVec, snapped)
+      obj.setPosition(newPos.x, newPos.y, newPos.z)
+      const id = obj.group.userData.assetObjectId
+      if (id) labelManager.update(id, [newPos.x, newPos.y + 0.3, newPos.z], ymapLabel(id), '')
+      const ft = (snapped / 0.3048)
+      sizeLabel.show(`${axis.toUpperCase()}: ${ft >= 0 ? '+' : ''}${ft.toFixed(2)}'`, [e.clientX, e.clientY])
+    }
+    return
+  }
+
   // Rotate drag
   if (rotating) {
     const { obj, axis, center } = rotating
@@ -554,10 +615,10 @@ renderer.domElement.addEventListener('pointermove', e => {
       rotating.lastAngle = angle
       const SNAP = 45 * Math.PI / 180
       const snapped = Math.round(rotating.accumulated / SNAP) * SNAP
-      if (axis === 'y')      obj.group.rotation.y = rotating.initY + snapped
-      else if (axis === 'x') obj.group.rotation.x = rotating.initX + snapped
-      else                   obj.group.rotation.z = rotating.initZ + snapped
-      obj._refreshSelectionBox()
+      const rx = axis === 'x' ? rotating.initX + snapped : obj.group.rotation.x
+      const ry = axis === 'y' ? rotating.initY + snapped : obj.group.rotation.y
+      const rz = axis === 'z' ? rotating.initZ + snapped : obj.group.rotation.z
+      obj.setRotation(rx, ry, rz)
       const deg = Math.round(snapped * 180 / Math.PI)
       sizeLabel.show(`${axis.toUpperCase()}: ${deg >= 0 ? '+' : ''}${deg}°`, [e.clientX, e.clientY])
     }
@@ -613,13 +674,26 @@ renderer.domElement.addEventListener('pointermove', e => {
     hovered?.hoverOn?.()
   }
   // Cursor
-  let overRotateHandle = false
-  if (selected?._rotateHandles) {
-    for (const mesh of Object.values(selected._rotateHandles)) {
-      if (raycaster.intersectObject(mesh, false).length) { overRotateHandle = true; break }
+  let newGizmoHandle = null
+  if (selected?._gizmo) {
+    gizmoCheck: {
+      for (const arrows of Object.values(selected._gizmo.translateHandles)) {
+        for (const g of arrows) {
+          if (raycaster.intersectObject(g, true).length) { newGizmoHandle = g; break gizmoCheck }
+        }
+      }
+      for (const m of Object.values(selected._gizmo.rotateHandles)) {
+        if (raycaster.intersectObject(m, false).length) { newGizmoHandle = m; break gizmoCheck }
+      }
     }
   }
-  if (overRotateHandle) {
+  if (newGizmoHandle !== hoveredGizmoHandle) {
+    if (hoveredGizmoHandle) setGizmoOpacity(hoveredGizmoHandle, 0.5)
+    if (newGizmoHandle)     setGizmoOpacity(newGizmoHandle, 0.85)
+    hoveredGizmoHandle = newGizmoHandle
+  }
+  const overGizmo = !!newGizmoHandle
+  if (overGizmo) {
     renderer.domElement.style.cursor = 'crosshair'
   } else if (pick?.hit?.object?.userData?.isExtrudeHandle) {
     renderer.domElement.style.cursor = 'ns-resize'
@@ -632,6 +706,16 @@ renderer.domElement.addEventListener('pointermove', e => {
 })
 
 renderer.domElement.addEventListener('pointerup', () => {
+  if (translating) {
+    const { obj } = translating
+    const id = obj.group.userData.assetObjectId
+    if (id) {
+      const p = obj.group.position
+      upsertObject(id, { position: [p.x, p.y, p.z] })
+    }
+    obj._refreshSelectionBox()
+    translating = null
+  }
   if (rotating) {
     const { obj } = rotating
     const id = obj.group.userData.assetObjectId
@@ -947,6 +1031,12 @@ function buildDebugPanel() {
   row('Drawn — Floor', () => hexFromColor(COLORS.drawnFloor), v => COLORS.drawnFloor.set(v))
   row('Drawn — Wall',  () => hexFromColor(COLORS.drawnWall),  v => COLORS.drawnWall.set(v))
   row('Primitive',     () => hexFromColor(COLORS.primitive),  v => COLORS.primitive.set(v))
+  row('Projection surface', () => hexFromColor(COLORS.projSurface), v => {
+    COLORS.projSurface.set(v)
+    for (const obj of liveObjects.values()) {
+      if (obj instanceof Projector) obj._projPlane.material.color.set(v)
+    }
+  })
 
   const note = document.createElement('div')
   note.style.cssText = 'margin-top:6px;font-size:9px;opacity:.55;line-height:1.4;'
