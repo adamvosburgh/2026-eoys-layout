@@ -21,9 +21,12 @@ db.exec(`
     is_global INTEGER DEFAULT 0,
     approved INTEGER DEFAULT 0,
     scan_source TEXT,
+    creator TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   );
 `)
+// Backfill: add creator column if upgrading from a pre-creator schema
+try { db.exec(`ALTER TABLE assets ADD COLUMN creator TEXT`) } catch (_) { /* already exists */ }
 
 export function getApprovedAssets() {
   return db.prepare('SELECT * FROM assets WHERE is_global=1 AND approved=1').all()
@@ -39,8 +42,8 @@ export function getAssetById(id) {
 
 export function insertAsset(asset) {
   return db.prepare(`
-    INSERT INTO assets (id, name, description, category, source, file_path, thumbnail_path, bounding_box, is_global, approved, scan_source)
-    VALUES ($id, $name, $description, $category, $source, $file_path, $thumbnail_path, $bounding_box, $is_global, $approved, $scan_source)
+    INSERT INTO assets (id, name, description, category, source, file_path, thumbnail_path, bounding_box, is_global, approved, scan_source, creator)
+    VALUES ($id, $name, $description, $category, $source, $file_path, $thumbnail_path, $bounding_box, $is_global, $approved, $scan_source, $creator)
   `).run({
     $id: asset.id,
     $name: asset.name,
@@ -53,11 +56,22 @@ export function insertAsset(asset) {
     $is_global: asset.is_global,
     $approved: asset.approved,
     $scan_source: asset.scan_source,
+    $creator: asset.creator || null,
   })
 }
 
+export function deleteAsset(id) {
+  return db.prepare(`DELETE FROM assets WHERE id=?`).run(id)
+}
+
+export function findScanAsset(scanSource, scanName) {
+  return db.prepare(
+    `SELECT * FROM assets WHERE source='scan' AND scan_source=? AND name=? LIMIT 1`
+  ).get(scanSource, scanName)
+}
+
 export function updateAsset(id, fields) {
-  const allowed = ['name', 'description', 'category', 'is_global', 'approved', 'bounding_box']
+  const allowed = ['name', 'description', 'category', 'is_global', 'approved', 'bounding_box', 'file_path', 'creator']
   const keys = Object.keys(fields).filter(k => allowed.includes(k))
   if (!keys.length) return
   const sets = keys.map(k => `${k}=$${k}`).join(', ')

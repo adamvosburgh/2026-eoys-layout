@@ -65,6 +65,7 @@ async function loadRoom(slug) {
   const meta = await fetch(`/models/${slug}/meta.json`).then(r => r.json())
   await roomLoader.load(slug)
   currentMeta = meta
+  updateFloorPlane()
 
   const gridSurfaces = roomLoader.getAllRoomMeshes()
     .filter(m => !m.name.toLowerCase().startsWith('door_'))
@@ -92,11 +93,13 @@ function syncObjectsFromYjs() {
 
   objectsMap.forEach((ymap, id) => {
     liveIds.delete(id)
-    const type = ymap.get('type')
-    const name = ymap.get('name') || ''
-    const desc = ymap.get('description') || ''
-    const pos  = ymap.get('position') || [0, 0, 0]
-    const rot  = ymap.get('rotation') || [0, 0, 0]
+    const type    = ymap.get('type')
+    const name    = ymap.get('name') || ''
+    const desc    = ymap.get('description') || ''
+    const creator = ymap.get('creator') || ''
+    const pos     = ymap.get('position') || [0, 0, 0]
+    const rot     = ymap.get('rotation') || [0, 0, 0]
+    const label   = formatLabel(creator, name)
 
     if (liveObjects.has(id)) {
       const obj = liveObjects.get(id)
@@ -104,14 +107,14 @@ function syncObjectsFromYjs() {
         const g = ymap.get('geometry') || {}
         if (g.centerWorld) obj.setCenterWorld(...g.centerWorld)
         if ((g.extrude || 0) !== (obj.desc.extrude || 0)) obj.setExtrude(g.extrude || 0)
-        labelManager.update(id, labelPosFor(obj), name, desc)
+        labelManager.update(id, labelPosFor(obj), label, desc)
       } else if (obj instanceof Projector || obj instanceof AssetObject) {
         obj.setPosition(...pos)
-        obj.setRotationY(rot[1])
-        labelManager.update(id, [pos[0], pos[1] + 0.3, pos[2]], name, desc)
+        obj instanceof AssetObject ? obj.setRotation(...rot) : obj.setRotationY(rot[1])
+        labelManager.update(id, [pos[0], pos[1] + 0.3, pos[2]], label, desc)
       }
     } else {
-      spawnFromYjs(id, type, ymap, pos, rot, name, desc)
+      spawnFromYjs(id, type, ymap, pos, rot, name, desc, creator)
     }
   })
 
@@ -147,7 +150,9 @@ function labelPosFor(obj) {
   return [p.x, p.y + 0.3, p.z]
 }
 
-function spawnFromYjs(id, type, ymap, pos, rot, name, desc) {
+function spawnFromYjs(id, type, ymap, pos, rot, name, desc, creator = '') {
+  const label = formatLabel(creator, name)
+
   if (type === 'projector') {
     const proj = new Projector({
       id, scene,
@@ -156,7 +161,7 @@ function spawnFromYjs(id, type, ymap, pos, rot, name, desc) {
     proj.setPosition(...pos)
     proj.setRotationY(rot[1])
     liveObjects.set(id, proj)
-    labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], name, desc, deleteObject)
+    labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], label, desc, deleteObject)
     return
   }
 
@@ -166,9 +171,15 @@ function spawnFromYjs(id, type, ymap, pos, rot, name, desc) {
     const mesh = makePrimitiveMesh(primType, geo.w, geo.d, geo.h)
     const obj = new AssetObject({ id, type, name, desc, scene, mesh })
     obj.setPosition(...pos)
-    obj.setRotationY(rot[1])
+    obj.setRotation(...rot)
     liveObjects.set(id, obj)
-    labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], name, desc, deleteObject)
+    labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], label, desc, deleteObject)
+    if (id === pendingSelectId) {
+      pendingSelectId = null
+      if (selected) selected.deselect?.()
+      selected = obj
+      obj.select()
+    }
     return
   }
 
@@ -177,7 +188,7 @@ function spawnFromYjs(id, type, ymap, pos, rot, name, desc) {
     const parentMesh = roomLoader.getAllRoomMeshes().find(m => m.name === g.parentName) || null
     const obj = new DrawnShape({ id, scene, desc: g, colorRefs: COLORS, parentMesh })
     liveObjects.set(id, obj)
-    labelManager.add(id, labelPosFor(obj), name, desc, deleteObject)
+    labelManager.add(id, labelPosFor(obj), label, desc, deleteObject)
     if (id === pendingSelectId) {
       pendingSelectId = null
       if (selected) selected.deselect?.()
@@ -189,22 +200,57 @@ function spawnFromYjs(id, type, ymap, pos, rot, name, desc) {
 
   if (type === 'label') {
     liveObjects.set(id, { dispose: () => {} })
-    labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], name, desc, deleteObject)
+    labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], label, desc, deleteObject)
     return
   }
 
   if (type === 'asset') {
     const filePath = ymap.get('filePath')
+    const bbox     = ymap.get('boundingBox')
+
+    const finishSpawn = (mesh) => {
+      mesh.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true } })
+      const obj = new AssetObject({ id, type, name, description: desc, scene, mesh })
+      obj.setPosition(...pos)
+      obj.setRotation(...rot)
+      liveObjects.set(id, obj)
+      labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], label, desc, deleteObject)
+      if (id === pendingSelectId) {
+        pendingSelectId = null
+        if (selected) selected.deselect?.()
+        selected = obj
+        obj.select()
+      }
+    }
+
     if (filePath) {
       gltfLoader.loadAsync(filePath).then(gltf => {
         const mesh = gltf.scene
-        mesh.layers.set(1)
-        const obj = new AssetObject({ id, type, name, description: desc, scene, mesh })
-        obj.setPosition(...pos)
-        obj.setRotationY(rot[1])
-        liveObjects.set(id, obj)
-        labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], name, desc, deleteObject)
+        // Center XZ so the asset sits at the group's drag handle, and
+        // bottom-align Y so it rests on the floor at the group position.
+        const meshBox = new THREE.Box3().setFromObject(mesh)
+        if (isFinite(meshBox.min.y)) {
+          const c = new THREE.Vector3()
+          meshBox.getCenter(c)
+          mesh.position.x -= c.x
+          mesh.position.y -= meshBox.min.y
+          mesh.position.z -= c.z
+        }
+        finishSpawn(mesh)
       })
+    } else if (bbox && bbox.min && bbox.max) {
+      // Scan-only asset (no GLB attached) — placeholder box from scan bbox
+      const w = Math.max(bbox.max[0] - bbox.min[0], 0.05)
+      const h = Math.max(bbox.max[1] - bbox.min[1], 0.05)
+      const d = Math.max(bbox.max[2] - bbox.min[2], 0.05)
+      const geo = new THREE.BoxGeometry(w, h, d)
+      geo.translate(0, h / 2, 0)  // bottom at local y=0
+      const mat = new THREE.MeshStandardMaterial({
+        color: COLORS.primitive.getHex(),
+        roughness: 0.7, metalness: 0.0,
+        transparent: true, opacity: 0.65,
+      })
+      finishSpawn(new THREE.Mesh(geo, mat))
     }
     return
   }
@@ -215,36 +261,63 @@ function makePrimitiveMesh(primType, w, d, h) {
   if (primType === 'cylinder') geo = new THREE.CylinderGeometry(w / 2, w / 2, h, 16)
   else if (primType === 'sphere') geo = new THREE.SphereGeometry(w / 2, 16, 12)
   else geo = new THREE.BoxGeometry(w, h, d)
-  const mat = new THREE.MeshLambertMaterial({ color: COLORS.primitive.getHex() })
+  const mat = new THREE.MeshStandardMaterial({
+    color: COLORS.primitive.getHex(),
+    roughness: 0.7,
+    metalness: 0.0,
+  })
   const mesh = new THREE.Mesh(geo, mat)
   mesh.position.y = h / 2
+  mesh.castShadow = true
+  mesh.receiveShadow = true
   return mesh
 }
 
 // ─── Placing Objects ─────────────────────────────────────────────────────────
 
-function placeAsset(asset) {
+function placeAsset(asset, worldPos) {
   const id = uuidv4()
+  pendingSelectId = id
+
+  let bbox = null
+  if (asset.bounding_box) {
+    try { bbox = JSON.parse(asset.bounding_box) } catch (_) { /* ignore */ }
+  }
+
+  // If a world position was passed (e.g. from drag-and-drop), use that;
+  // otherwise place where the camera target is (what the user is looking at).
+  // Y always = floor TOP surface so the bottom of the asset rests on it.
+  const floorY = roomLoader.floorTopY
+  const t = worldPos || controls.target
+  const pos = [snap(t.x), floorY, snap(t.z)]
+
   upsertObject(id, {
     type: asset.category === 'projector' ? 'projector' : 'asset',
     assetId: asset.id,
     filePath: asset.file_path ? `/api/asset-file/${asset.id}` : null,
+    boundingBox: bbox,
+    creator: asset.creator || '',
     name: asset.name,
     description: asset.description || '',
-    position: [snap(camera.position.x), 0, snap(camera.position.z)],
+    position: pos,
     rotation: [0, 0, 0],
     createdBy: getAwareness()?.clientID?.toString() || '',
   })
 }
 
 function placePrimitive({ primType, w, d, h }) {
-  promptLabel(name => {
-    upsertObject(uuidv4(), {
+  promptLabel(({ creator, name, description }) => {
+    const id = uuidv4()
+    pendingSelectId = id
+    const target = controls.target
+    const floorY = roomLoader.floorTopY
+    upsertObject(id, {
       type: 'primitive',
       primType,
       geometry: { w, d, h },
-      name, description: '',
-      position: [0, 0, 0], rotation: [0, 0, 0],
+      creator, name, description,
+      position: [snap(target.x), floorY, snap(target.z)],
+      rotation: [0, 0, 0],
       createdBy: getAwareness()?.clientID?.toString() || '',
     })
   })
@@ -252,14 +325,14 @@ function placePrimitive({ primType, w, d, h }) {
 
 let pendingSelectId = null
 
-function placeDrawnShape(desc) {
-  promptLabel(name => {
+function placeDrawnShape(geo) {
+  promptLabel(({ creator, name, description }) => {
     const id = uuidv4()
     pendingSelectId = id
     upsertObject(id, {
       type: 'drawn',
-      geometry: desc,
-      name, description: '',
+      geometry: geo,
+      creator, name, description,
       position: [0, 0, 0], rotation: [0, 0, 0],
       createdBy: getAwareness()?.clientID?.toString() || '',
     })
@@ -268,14 +341,22 @@ function placeDrawnShape(desc) {
 
 // ─── Label dialog ────────────────────────────────────────────────────────────
 
+function getSavedCreator() { return localStorage.getItem('eoys_creator') || '' }
+function setSavedCreator(v) { localStorage.setItem('eoys_creator', v) }
+
+/** Prompts for creator + name + description. Both creator and name required.
+ *  Calls onConfirm({ creator, name, description }). */
 function promptLabel(onConfirm) {
   const overlay = document.createElement('div')
   overlay.className = 'dialog-overlay'
+  const saved = getSavedCreator()
   overlay.innerHTML = `
     <div class="dialog">
       <h2>Name this object</h2>
-      <label>Name (required)</label>
-      <input type="text" id="dlg-name" placeholder="e.g. Drawing 1" />
+      <label>Creator (you)</label>
+      <input type="text" id="dlg-creator" placeholder="firstname lastname" />
+      <label>Name</label>
+      <input type="text" id="dlg-name" placeholder="Drawing 1" />
       <label>Description (optional)</label>
       <input type="text" id="dlg-desc" placeholder="" />
       <div class="dialog-actions">
@@ -285,15 +366,28 @@ function promptLabel(onConfirm) {
     </div>
   `
   document.body.appendChild(overlay)
-  overlay.querySelector('#dlg-name').focus()
+  const creatorInp = overlay.querySelector('#dlg-creator')
+  const nameInp    = overlay.querySelector('#dlg-name')
+  creatorInp.value = saved
+  ;(saved ? nameInp : creatorInp).focus()
+
   const close = () => document.body.removeChild(overlay)
   overlay.querySelector('#dlg-cancel').addEventListener('click', close)
   overlay.querySelector('#dlg-ok').addEventListener('click', () => {
-    const name = overlay.querySelector('#dlg-name').value.trim()
-    if (!name) { overlay.querySelector('#dlg-name').focus(); return }
+    const creator = creatorInp.value.trim()
+    const name    = nameInp.value.trim()
+    const description = overlay.querySelector('#dlg-desc').value.trim()
+    if (!creator) { creatorInp.focus(); return }
+    if (!name)    { nameInp.focus();    return }
+    setSavedCreator(creator)
     close()
-    onConfirm(name)
+    onConfirm({ creator, name, description })
   })
+}
+
+/** Compose the visible label text from creator + name. */
+function formatLabel(creator, name) {
+  return creator ? `${creator} - ${name}` : (name || '')
 }
 
 // ─── Interaction ─────────────────────────────────────────────────────────────
@@ -302,6 +396,7 @@ let selected = null
 let hovered  = null
 let dragging = false        // moving an object
 let extruding = null        // { shape, initialOffset, initialExtrude }
+let rotating = null         // { obj, axis, center, lastAngle, accumulated, initX, initY, initZ }
 let dragSurface = null      // for non-drawn assets: { plane, y } for floor-plane drag
 const raycaster = new THREE.Raycaster()
 raycaster.layers.enableAll()
@@ -311,6 +406,31 @@ function setMouse(e) {
   const rect = renderer.domElement.getBoundingClientRect()
   mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
   mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+}
+
+/** Angle of the cursor on the plane perpendicular to `axis` through `center`. */
+function getAngleOnAxis(axis, center) {
+  const pt = new THREE.Vector3()
+  let plane
+  if (axis === 'y') {
+    plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -center.y)
+    if (!raycaster.ray.intersectPlane(plane, pt)) return null
+    return Math.atan2(pt.z - center.z, pt.x - center.x)
+  } else if (axis === 'x') {
+    plane = new THREE.Plane(new THREE.Vector3(1, 0, 0), -center.x)
+    if (!raycaster.ray.intersectPlane(plane, pt)) return null
+    return Math.atan2(pt.y - center.y, pt.z - center.z)
+  } else {
+    plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -center.z)
+    if (!raycaster.ray.intersectPlane(plane, pt)) return null
+    return Math.atan2(pt.y - center.y, pt.x - center.x)
+  }
+}
+
+function wrapAngle(a) {
+  while (a >  Math.PI) a -= 2 * Math.PI
+  while (a < -Math.PI) a += 2 * Math.PI
+  return a
 }
 
 /** Raycast all selectable user objects (groups), return closest hit (with obj). */
@@ -332,6 +452,27 @@ renderer.domElement.addEventListener('pointerdown', e => {
   if (drawMode) return
   setMouse(e)
   raycaster.setFromCamera(mouse, camera)
+
+  // Rotate handles (only visible on selected object)
+  if (selected?._rotateHandles) {
+    for (const [axis, mesh] of Object.entries(selected._rotateHandles)) {
+      if (!raycaster.intersectObject(mesh, false).length) continue
+      const box = new THREE.Box3().setFromObject(selected.group)
+      const center = new THREE.Vector3()
+      box.getCenter(center)
+      const angle = getAngleOnAxis(axis, center)
+      if (angle !== null) {
+        rotating = {
+          obj: selected, axis, center, lastAngle: angle, accumulated: 0,
+          initX: selected.group.rotation.x,
+          initY: selected.group.rotation.y,
+          initZ: selected.group.rotation.z,
+        }
+        controls.enabled = false
+      }
+      return
+    }
+  }
 
   const pick = pickUserObject()
   if (!pick) {
@@ -363,9 +504,10 @@ renderer.domElement.addEventListener('pointerdown', e => {
   dragging = true
   controls.enabled = false
 
-  // Set up drag plane for non-drawn assets
+  // Set up drag plane for non-drawn assets — always the floor TOP so existing
+  // placements that ended up at the underside snap up on first drag.
   if (!(selected instanceof DrawnShape)) {
-    const y = (selected.group?.position?.y) || 0
+    const y = roomLoader.floorTopY
     dragSurface = { plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), y }
   } else {
     dragSurface = null
@@ -394,10 +536,30 @@ renderer.domElement.addEventListener('pointermove', e => {
         extruding.shape.setExtrude(newExt)
         labelManager.update(extruding.shape.id,
           labelPosFor(extruding.shape),
-          ymapName(extruding.shape.id), '')
+          ymapLabel(extruding.shape.id), '')
         upsertObject(extruding.shape.id, { geometry: extruding.shape.desc })
       }
       sizeLabel.show(`extrude: ${metersToFeetInches(extruding.shape.desc.extrude)}`, [e.clientX, e.clientY])
+    }
+    return
+  }
+
+  // Rotate drag
+  if (rotating) {
+    const { obj, axis, center } = rotating
+    const angle = getAngleOnAxis(axis, center)
+    if (angle !== null) {
+      const delta = wrapAngle(angle - rotating.lastAngle)
+      rotating.accumulated += delta
+      rotating.lastAngle = angle
+      const SNAP = 45 * Math.PI / 180
+      const snapped = Math.round(rotating.accumulated / SNAP) * SNAP
+      if (axis === 'y')      obj.group.rotation.y = rotating.initY + snapped
+      else if (axis === 'x') obj.group.rotation.x = rotating.initX + snapped
+      else                   obj.group.rotation.z = rotating.initZ + snapped
+      obj._refreshSelectionBox()
+      const deg = Math.round(snapped * 180 / Math.PI)
+      sizeLabel.show(`${axis.toUpperCase()}: ${deg >= 0 ? '+' : ''}${deg}°`, [e.clientX, e.clientY])
     }
     return
   }
@@ -423,7 +585,7 @@ renderer.domElement.addEventListener('pointermove', e => {
       const cw = selected.desc.centerWorld
       if (cw[0] !== newCenter.x || cw[1] !== newCenter.y || cw[2] !== newCenter.z) {
         selected.setCenterWorld(newCenter.x, newCenter.y, newCenter.z)
-        labelManager.update(selected.id, labelPosFor(selected), ymapName(selected.id), '')
+        labelManager.update(selected.id, labelPosFor(selected), ymapLabel(selected.id), '')
         upsertObject(selected.id, { geometry: selected.desc })
       }
     } else if (dragSurface) {
@@ -433,7 +595,7 @@ renderer.domElement.addEventListener('pointermove', e => {
         if (id) {
           const pos = [snap(pt.x), dragSurface.y, snap(pt.z)]
           selected.setPosition?.(...pos)
-          labelManager.update(id, [pos[0], pos[1] + 0.3, pos[2]], ymapName(id), '')
+          labelManager.update(id, [pos[0], pos[1] + 0.3, pos[2]], ymapLabel(id), '')
           upsertObject(id, { position: pos })
         }
       }
@@ -446,12 +608,20 @@ renderer.domElement.addEventListener('pointermove', e => {
   const pick = pickUserObject()
   const newHover = pick?.obj || null
   if (newHover !== hovered) {
-    if (hovered && hovered !== selected) hovered.hoverOff?.()
+    hovered?.hoverOff?.()
     hovered = newHover
-    if (hovered && hovered !== selected) hovered.hoverOn?.()
+    hovered?.hoverOn?.()
   }
-  // Cursor: special pointer over extrude handle, move pointer over body
-  if (pick?.hit?.object?.userData?.isExtrudeHandle) {
+  // Cursor
+  let overRotateHandle = false
+  if (selected?._rotateHandles) {
+    for (const mesh of Object.values(selected._rotateHandles)) {
+      if (raycaster.intersectObject(mesh, false).length) { overRotateHandle = true; break }
+    }
+  }
+  if (overRotateHandle) {
+    renderer.domElement.style.cursor = 'crosshair'
+  } else if (pick?.hit?.object?.userData?.isExtrudeHandle) {
     renderer.domElement.style.cursor = 'ns-resize'
   } else if (pick) {
     renderer.domElement.style.cursor = 'grab'
@@ -462,6 +632,17 @@ renderer.domElement.addEventListener('pointermove', e => {
 })
 
 renderer.domElement.addEventListener('pointerup', () => {
+  if (rotating) {
+    const { obj } = rotating
+    const id = obj.group.userData.assetObjectId
+    if (id) {
+      upsertObject(id, {
+        rotation: [obj.group.rotation.x, obj.group.rotation.y, obj.group.rotation.z],
+      })
+    }
+    obj._refreshSelectionBox()
+    rotating = null
+  }
   dragging = false
   extruding = null
   dragSurface = null
@@ -472,6 +653,30 @@ renderer.domElement.addEventListener('pointerup', () => {
 renderer.domElement.addEventListener('pointerleave', () => {
   grid.hideHover()
   if (hovered && hovered !== selected) { hovered.hoverOff?.(); hovered = null }
+})
+
+// Drag-and-drop assets from the panel onto the canvas
+renderer.domElement.addEventListener('dragover', e => {
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+})
+renderer.domElement.addEventListener('drop', e => {
+  e.preventDefault()
+  const json = e.dataTransfer?.getData('application/json')
+  if (!json) return
+  let asset
+  try { asset = JSON.parse(json) } catch (_) { return }
+  if (!asset) return
+
+  // Raycast from drop point onto the floor plane to choose where to spawn
+  setMouse(e)
+  raycaster.setFromCamera(mouse, camera)
+  const pt = new THREE.Vector3()
+  if (raycaster.ray.intersectPlane(floorPlane, pt)) {
+    placeAsset(asset, pt)
+  } else {
+    placeAsset(asset)
+  }
 })
 
 window.addEventListener('keydown', e => {
@@ -504,8 +709,10 @@ function projectRayOntoOutwardLine(shape) {
   return (a * e - b * d) / denom
 }
 
-function ymapName(id) {
-  return getObjects()?.get(id)?.get('name') || ''
+function ymapLabel(id) {
+  const m = getObjects()?.get(id)
+  if (!m) return ''
+  return formatLabel(m.get('creator') || '', m.get('name') || '')
 }
 
 // ─── Projector tooltip ───────────────────────────────────────────────────────
@@ -629,18 +836,18 @@ const createPanel = new CreatePanel(createPanelEl, ({ kind, primType, w, d, h, f
       const scale = Math.min(w / size.x, h / size.y, d / size.z)
       mesh.scale.setScalar(scale)
       mesh.layers.set(1)
-      promptLabel(name => {
+      promptLabel(({ creator, name, description }) => {
         const id = uuidv4()
         upsertObject(id, {
           type: 'primitive', primType: 'upload',
           geometry: { w, d, h },
-          name, description: '',
+          creator, name, description,
           position: [0, 0, 0], rotation: [0, 0, 0],
           createdBy: getAwareness()?.clientID?.toString() || '',
         })
-        const obj = new AssetObject({ id, type: 'primitive', name, description: '', scene, mesh })
+        const obj = new AssetObject({ id, type: 'primitive', name, description, scene, mesh })
         liveObjects.set(id, obj)
-        labelManager.add(id, [0, 0.3, 0], name, '', deleteObject)
+        labelManager.add(id, [0, 0.3, 0], formatLabel(creator, name), description, deleteObject)
       })
     })
   }
@@ -668,6 +875,10 @@ const visToggles = new VisibilityToggles(
 // ─── Render loop label update + awareness cursor ─────────────────────────────
 
 const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+function updateFloorPlane() {
+  const y = roomLoader.floorTopY ?? 0
+  floorPlane.set(new THREE.Vector3(0, 1, 0), -y)
+}
 roomScene.onFrame(() => {
   labelManager.render()
 
@@ -741,6 +952,68 @@ function buildDebugPanel() {
   note.style.cssText = 'margin-top:6px;font-size:9px;opacity:.55;line-height:1.4;'
   note.textContent = 'Drawn/Primitive: applies to NEW objects only.'
   body.appendChild(note)
+
+  // ── Lights section ──────────────────────────────────────────────────────
+  const lightHeader = document.createElement('div')
+  lightHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-top:1px solid #000;border-bottom:1px solid #000;cursor:pointer;user-select:none;margin-top:8px;margin-left:-12px;margin-right:-12px;'
+  lightHeader.innerHTML = `<span style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;">Lights</span><span id="light-toggle" style="font-size:10px;">[ + ]</span>`
+  body.appendChild(lightHeader)
+
+  const lightBody = document.createElement('div')
+  lightBody.style.cssText = 'padding:8px 0;display:none;flex-direction:column;gap:8px;'
+  body.appendChild(lightBody)
+
+  let lightCollapsed = true
+  lightHeader.addEventListener('click', () => {
+    lightCollapsed = !lightCollapsed
+    lightBody.style.display = lightCollapsed ? 'none' : 'flex'
+    lightHeader.querySelector('#light-toggle').textContent = lightCollapsed ? '[ + ]' : '[ − ]'
+  })
+
+  function slider(parent, label, min, max, step, getValue, setValue) {
+    const r = document.createElement('div')
+    r.style.cssText = 'display:flex;align-items:center;gap:8px;'
+    const lbl = document.createElement('span'); lbl.style.cssText = 'flex:0 0 110px;font-size:10px;'; lbl.textContent = label
+    const inp = document.createElement('input'); inp.type = 'range'; inp.min = min; inp.max = max; inp.step = step
+    inp.value = getValue(); inp.style.cssText = 'flex:1;'
+    const val = document.createElement('span'); val.style.cssText = 'flex:0 0 36px;text-align:right;font-size:10px;opacity:.7;'
+    val.textContent = (+getValue()).toFixed(2)
+    inp.addEventListener('input', () => {
+      const v = parseFloat(inp.value); setValue(v); val.textContent = v.toFixed(2)
+    })
+    r.appendChild(lbl); r.appendChild(inp); r.appendChild(val)
+    parent.appendChild(r)
+  }
+
+  slider(lightBody, 'Direct (sun)', 0, 4, 0.05,
+    () => roomScene.dirLight.intensity,
+    v => roomScene.dirLight.intensity = v)
+
+  slider(lightBody, 'Ambient (IBL)', 0, 3, 0.05,
+    () => scene.environmentIntensity ?? 1,
+    v => scene.environmentIntensity = v)
+
+  slider(lightBody, 'Exposure', 0, 2, 0.05,
+    () => renderer.toneMappingExposure,
+    v => renderer.toneMappingExposure = v)
+
+  // Shadow on/off
+  const shadowRow = document.createElement('div')
+  shadowRow.style.cssText = 'display:flex;align-items:center;gap:8px;'
+  const shadowLbl = document.createElement('span'); shadowLbl.style.cssText = 'flex:1;font-size:10px;'; shadowLbl.textContent = 'Cast shadows'
+  const shadowInp = document.createElement('input'); shadowInp.type = 'checkbox'; shadowInp.checked = true
+  shadowInp.addEventListener('change', () => roomScene.dirLight.castShadow = shadowInp.checked)
+  shadowRow.appendChild(shadowLbl); shadowRow.appendChild(shadowInp)
+  lightBody.appendChild(shadowRow)
+
+  // White-walls toggle
+  const toggleRow = document.createElement('div')
+  toggleRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:8px;'
+  const toggleLbl = document.createElement('span'); toggleLbl.style.cssText = 'flex:1;'; toggleLbl.textContent = 'White walls'
+  const toggleInp = document.createElement('input'); toggleInp.type = 'checkbox'; toggleInp.checked = true
+  toggleInp.addEventListener('change', () => roomLoader.setUseWhite(toggleInp.checked))
+  toggleRow.appendChild(toggleLbl); toggleRow.appendChild(toggleInp)
+  body.appendChild(toggleRow)
 
   // Camera section
   const camHeader = document.createElement('div')

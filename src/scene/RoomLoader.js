@@ -3,6 +3,13 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 
 const loader = new GLTFLoader()
 
+const WHITE_MAT = new THREE.MeshStandardMaterial({
+  color:     0xf2f2f2,
+  roughness: 0.85,
+  metalness: 0.0,
+  side:      THREE.FrontSide,
+})
+
 export class RoomLoader {
   constructor(scene) {
     this.scene = scene
@@ -10,6 +17,9 @@ export class RoomLoader {
     this._wallMeshes = []
     this._floorMeshes = []
     this._allMeshes = []
+    this._originalMaterials = new WeakMap()  // mesh → polycam material
+    this.useWhite = true
+    this.floorTopY = 0  // top surface of the floor (Polycam exports thick floor slabs)
   }
 
   async load(slug) {
@@ -33,6 +43,10 @@ export class RoomLoader {
       child.castShadow = true
       child.receiveShadow = true
 
+      // Stash polycam material; swap to white if requested
+      this._originalMaterials.set(child, child.material)
+      if (this.useWhite) child.material = WHITE_MAT
+
       const name = child.name.toLowerCase()
       if (name.startsWith('floor_')) {
         this._floorMeshes.push(child)
@@ -44,6 +58,16 @@ export class RoomLoader {
 
     this._roomGroup = root
     this.scene.add(root)
+
+    // Compute floor TOP — the surface things should sit on. Polycam floor
+    // meshes are thick slabs, so meta.floorY (bbox.min.y) is the underside.
+    let topY = -Infinity
+    for (const m of this._floorMeshes) {
+      const box = new THREE.Box3().setFromObject(m)
+      if (box.max.y > topY) topY = box.max.y
+    }
+    this.floorTopY = isFinite(topY) ? topY : 0
+
     return root
   }
 
@@ -69,4 +93,12 @@ export class RoomLoader {
   getWallMeshes()   { return this._wallMeshes }
   getFloorMeshes()  { return this._floorMeshes }
   getAllRoomMeshes() { return this._allMeshes }
+
+  setUseWhite(v) {
+    this.useWhite = !!v
+    for (const m of this._allMeshes) {
+      const orig = this._originalMaterials.get(m)
+      m.material = this.useWhite ? WHITE_MAT : (orig || m.material)
+    }
+  }
 }

@@ -68,14 +68,28 @@
             <label>Category</label>
             <select id="up-category">
               <option value="furniture">Furniture</option>
+              <option value="screen">Screen</option>
               <option value="projector">Projector</option>
-              <option value="custom">Custom</option>
+              <option value="other">Other</option>
             </select>
           </div>
         </div>
-        <label>Description</label>
-        <input type="text" id="up-desc" placeholder="Optional" />
+        <div class="form-row">
+          <div>
+            <label>Creator</label>
+            <input type="text" id="up-creator" placeholder="firstname lastname" />
+          </div>
+          <div>
+            <label>Description</label>
+            <input type="text" id="up-desc" placeholder="Optional" />
+          </div>
+        </div>
         <label>Bounding Box (feet: W × D × H)</label>
+        <div class="toggle-row" style="margin-bottom:8px">
+          <input type="checkbox" id="up-infer" />
+          <label style="display:inline;margin:0">Infer dimensions from file</label>
+          <span id="up-infer-status" style="font-size:11px;color:#666;margin-left:8px"></span>
+        </div>
         <div class="form-row-3">
           <input type="number" id="up-w" placeholder="W" step="0.5" min="0" />
           <input type="number" id="up-d" placeholder="D" step="0.5" min="0" />
@@ -92,7 +106,7 @@
       <table id="library-table">
         <thead>
           <tr>
-            <th>Name</th><th>Category</th><th>Source</th><th>Global</th><th>Status</th><th>Actions</th>
+            <th>Name</th><th>Creator</th><th>Category</th><th>Source</th><th>Global</th><th>Status</th><th>Actions</th>
           </tr>
         </thead>
         <tbody id="library-body"></tbody>
@@ -107,7 +121,7 @@
       <table>
         <thead>
           <tr>
-            <th>Scan Name</th><th>Category</th><th>Bounding Box</th><th>Name</th><th>Global</th><th>Actions</th>
+            <th>Scan Name</th><th>Category</th><th>Bounding Box</th><th>Name</th><th>Creator</th><th>Global</th><th>Actions</th>
           </tr>
         </thead>
         <tbody id="scans-body"></tbody>
@@ -116,6 +130,28 @@
   </main>
 
   <script type="module">
+    import * as THREE from 'https://esm.sh/three@0.176.0'
+    import { GLTFLoader } from 'https://esm.sh/three@0.176.0/addons/loaders/GLTFLoader.js'
+
+    const FT_TO_M = 0.3048
+
+    async function inferDimsFromGlb(file) {
+      return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file)
+        new GLTFLoader().load(url, gltf => {
+          URL.revokeObjectURL(url)
+          const box = new THREE.Box3().setFromObject(gltf.scene)
+          const size = new THREE.Vector3()
+          box.getSize(size)
+          resolve({
+            w: parseFloat((size.x / FT_TO_M).toFixed(2)),
+            d: parseFloat((size.z / FT_TO_M).toFixed(2)),
+            h: parseFloat((size.y / FT_TO_M).toFixed(2)),
+          })
+        }, undefined, err => { URL.revokeObjectURL(url); reject(err) })
+      })
+    }
+
     // Tab switching
     document.querySelectorAll('.tab-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -133,16 +169,47 @@
       form.style.display = form.style.display === 'none' ? 'block' : 'none'
     })
 
-    // Load library
+    // Infer dims from file
+    async function runAdminInfer() {
+      const file = document.getElementById('up-file').files[0]
+      const status = document.getElementById('up-infer-status')
+      if (!file) return
+      if (!file.name.toLowerCase().endsWith('.glb')) {
+        status.textContent = 'Only .glb supported'
+        return
+      }
+      status.textContent = 'Reading…'
+      try {
+        const dims = await inferDimsFromGlb(file)
+        document.getElementById('up-w').value = dims.w
+        document.getElementById('up-d').value = dims.d
+        document.getElementById('up-h').value = dims.h
+        status.textContent = ''
+      } catch {
+        status.textContent = 'Could not read file'
+      }
+    }
+
+    document.getElementById('up-file').addEventListener('change', () => {
+      if (document.getElementById('up-infer').checked) runAdminInfer()
+    })
+
+    document.getElementById('up-infer').addEventListener('change', () => {
+      if (document.getElementById('up-infer').checked && document.getElementById('up-file').files[0]) runAdminInfer()
+    })
+
+    // Load library — exclude pending scan items (those live on the Scans tab)
     async function loadLibrary() {
       const res = await fetch('/api/admin/assets')
-      const assets = await res.json()
+      const all = await res.json()
+      const assets = all.filter(a => !(a.source === 'scan' && !a.approved))
       const tbody = document.getElementById('library-body')
       tbody.innerHTML = ''
       for (const a of assets) {
         const tr = document.createElement('tr')
         tr.innerHTML = `
           <td>${a.name}</td>
+          <td>${a.creator || ''}</td>
           <td>${a.category || ''}</td>
           <td>${a.source || ''}</td>
           <td>${a.is_global ? '✓' : ''}</td>
@@ -152,10 +219,20 @@
             <button class="btn" data-id="${a.id}" data-action="toggle-global" style="margin-left:4px">
               ${a.is_global ? 'Remove from Library' : 'Add to Library'}
             </button>
+            <button class="btn" data-id="${a.id}" data-action="delete" style="margin-left:4px;color:#c00;border-color:#c00">Delete</button>
           </td>
         `
         tbody.appendChild(tr)
       }
+
+      tbody.querySelectorAll('[data-action="delete"]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const a = assets.find(x => x.id === btn.dataset.id)
+          if (!confirm(`Delete asset "${a?.name || btn.dataset.id}"? This cannot be undone.`)) return
+          await fetch(`/api/admin/assets/${btn.dataset.id}`, { method: 'DELETE' })
+          loadLibrary()
+        })
+      })
 
       tbody.querySelectorAll('[data-action="approve"]').forEach(btn => {
         btn.addEventListener('click', async () => {
@@ -190,6 +267,7 @@
       fd.append('name', document.getElementById('up-name').value || file.name)
       fd.append('description', document.getElementById('up-desc').value)
       fd.append('category', document.getElementById('up-category').value)
+      fd.append('creator', document.getElementById('up-creator').value || '')
       const w = parseFloat(document.getElementById('up-w').value) * 0.3048 || 0
       const d = parseFloat(document.getElementById('up-d').value) * 0.3048 || 0
       const h = parseFloat(document.getElementById('up-h').value) * 0.3048 || 0
@@ -225,6 +303,7 @@
           <td>${a.category || ''}</td>
           <td style="font-size:11px">${bboxStr}</td>
           <td><input type="text" placeholder="Proper name" data-id="${a.id}" class="scan-name" value="${a.name}" style="margin:0" /></td>
+          <td><input type="text" placeholder="firstname lastname" data-id="${a.id}" class="scan-creator" value="${a.creator || ''}" style="margin:0" /></td>
           <td><input type="checkbox" class="scan-global" data-id="${a.id}" /></td>
           <td><button class="btn green" data-id="${a.id}" data-action="add-scan">Add to Library</button></td>
         `
@@ -234,15 +313,19 @@
       tbody.querySelectorAll('[data-action="add-scan"]').forEach(btn => {
         btn.addEventListener('click', async () => {
           const nameInput = tbody.querySelector(`.scan-name[data-id="${btn.dataset.id}"]`)
+          const creatorInput = tbody.querySelector(`.scan-creator[data-id="${btn.dataset.id}"]`)
           const globalInput = tbody.querySelector(`.scan-global[data-id="${btn.dataset.id}"]`)
           const name = nameInput?.value?.trim()
+          const creator = creatorInput?.value?.trim()
           if (!name) { nameInput?.focus(); return }
+          if (!creator) { creatorInput?.focus(); return }
           await fetch(`/api/admin/assets/${btn.dataset.id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, approved: true, is_global: globalInput?.checked ? 1 : 0 }),
+            body: JSON.stringify({ name, creator, approved: true, is_global: globalInput?.checked ? 1 : 0 }),
           })
           loadScans()
+          loadLibrary()  // newly-approved item now belongs in the library tab
         })
       })
     }

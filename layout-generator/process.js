@@ -86,6 +86,47 @@ function computeDocBBox(root) {
   return { min, max }
 }
 
+function subtreeContainsName(node, name) {
+  if (node.getName() === name) return true
+  for (const c of node.listChildren()) {
+    if (subtreeContainsName(c, name)) return true
+  }
+  return false
+}
+
+function pruneToName(node, name) {
+  if (node.getName() === name) return // keep entire subtree of target
+  for (const c of node.listChildren()) {
+    if (subtreeContainsName(c, name)) pruneToName(c, name)
+    else c.dispose()
+  }
+}
+
+/** Re-read the original GLB and produce a single-node GLB at outPath. */
+async function writeScanNodeGLB(originalBuffer, targetName, outPath) {
+  const io  = new NodeIO()
+  const doc = await io.readBinary(new Uint8Array(originalBuffer))
+  const root = doc.getRoot()
+
+  let foundAny = false
+  for (const scene of root.listScenes()) {
+    for (const node of scene.listChildren()) {
+      if (subtreeContainsName(node, targetName)) {
+        pruneToName(node, targetName)
+        foundAny = true
+      } else {
+        node.dispose()
+      }
+    }
+  }
+  if (!foundAny) return false
+
+  await doc.transform(prune())
+  const buf = await io.writeBinary(doc)
+  fs.writeFileSync(outPath, Buffer.from(buf))
+  return true
+}
+
 async function main() {
   const args = process.argv.slice(2)
   const raw  = args.includes('--raw')
@@ -184,17 +225,29 @@ async function processFile(arg, raw = false) {
   }
   console.log(`  Floor materials patched: ${floorMats.size}`)
 
-  // ── 5. Collect scan object metadata before removing ───────────────────────
-  const scanObjects = scanNodes.map(node => ({
-    scanName:    node.getName(),
-    category:    categoryFromName(node.getName()),
-    boundingBox: computeNodeBBox(node),
-    approved:    false,
-    assetId:     null,
-    scanSource:  slug,
-  }))
+  // ── 5. Collect scan object metadata + extract each as its own GLB ────────
+  const scanDir = path.resolve(__dirname, '..', 'public', 'models', slug, 'scans')
+  fs.mkdirSync(scanDir, { recursive: true })
 
-  // ── 6. Remove scan objects ────────────────────────────────────────────────
+  const scanObjects = []
+  for (const node of scanNodes) {
+    const scanName = node.getName()
+    const safeName = scanName.toLowerCase().replace(/[^a-z0-9_-]/g, '_')
+    const filename = `${safeName}.glb`
+    const ok = await writeScanNodeGLB(glbBuffer, scanName, path.join(scanDir, filename))
+    scanObjects.push({
+      scanName,
+      category:    categoryFromName(scanName),
+      boundingBox: computeNodeBBox(node),
+      approved:    false,
+      assetId:     null,
+      scanSource:  slug,
+      scanFile:    ok ? `public/models/${slug}/scans/${filename}` : null,
+    })
+  }
+  console.log(`  Extracted ${scanObjects.filter(s => s.scanFile).length} scan GLBs → public/models/${slug}/scans/`)
+
+  // ── 6. Remove scan objects from the main room.glb ────────────────────────
   for (const node of scanNodes) node.dispose()
   await document.transform(prune())
 

@@ -21,7 +21,9 @@ export class RoomScene {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true })
     this.renderer.setPixelRatio(window.devicePixelRatio)
     this.renderer.toneMapping = THREE.NeutralToneMapping
-    this.renderer.toneMappingExposure = 1
+    this.renderer.toneMappingExposure = 1.0
+    this.renderer.shadowMap.enabled = true
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
     this.container.appendChild(this.renderer.domElement)
     const { width, height } = this._size()
     this.renderer.setSize(width, height)
@@ -34,11 +36,27 @@ export class RoomScene {
     const pmrem = new THREE.PMREMGenerator(this.renderer)
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
     pmrem.dispose()
+    // Defaults tuned to give a flatter, ambient-dominant look out of the box.
+    this.scene.environmentIntensity = 3.0
+
+    // Directional "sun" — provides the sharp shadow term. IBL gives the soft fill.
+    this.dirLight = new THREE.DirectionalLight(0xffffff, 1.0)
+    this.dirLight.position.set(5, 12, 5)
+    this.dirLight.castShadow = true
+    this.dirLight.shadow.mapSize.set(2048, 2048)
+    const c = this.dirLight.shadow.camera
+    c.left = -12; c.right = 12; c.top = 12; c.bottom = -12
+    c.near = 0.1; c.far = 60
+    this.dirLight.shadow.bias = -0.0005
+    this.dirLight.shadow.normalBias = 0.02
+    this.dirLight.target.position.set(0, 1, 0)
+    this.scene.add(this.dirLight)
+    this.scene.add(this.dirLight.target)
   }
 
   _initCamera() {
     const { width, height } = this._size()
-    this.camera = new THREE.PerspectiveCamera(50, width / height, 0.05, 200)
+    this.camera = new THREE.PerspectiveCamera(75, width / height, 0.05, 200)
     this.camera.layers.enable(1)
     this.camera.position.set(...DEFAULT_CAM_POS)
     this.camera.lookAt(...DEFAULT_CAM_TARGET)

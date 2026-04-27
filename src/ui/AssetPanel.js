@@ -19,6 +19,8 @@ export class AssetPanel {
     for (const asset of assets) {
       const item = document.createElement('div')
       item.className = `asset-item${asset.category === 'projector' ? ' projector-asset' : ''}`
+      item.draggable = true
+      item.style.cursor = 'grab'
       item.innerHTML = `
         <div>
           <div class="asset-name">${asset.name}</div>
@@ -26,6 +28,10 @@ export class AssetPanel {
         </div>
       `
       item.addEventListener('click', () => this.onPlace(asset))
+      item.addEventListener('dragstart', e => {
+        e.dataTransfer.setData('application/json', JSON.stringify(asset))
+        e.dataTransfer.effectAllowed = 'copy'
+      })
       this.el.appendChild(item)
     }
   }

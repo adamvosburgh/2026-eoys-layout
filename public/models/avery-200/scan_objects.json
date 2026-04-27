@@ -16,7 +16,8 @@
     },
     "approved": false,
     "assetId": null,
-    "scanSource": "avery-200"
+    "scanSource": "avery-200",
+    "scanFile": "public/models/avery-200/scans/television0.glb"
   },
   {
     "scanName": "television1",
@@ -35,6 +36,7 @@
     },
     "approved": false,
     "assetId": null,
-    "scanSource": "avery-200"
+    "scanSource": "avery-200",
+    "scanFile": "public/models/avery-200/scans/television1.glb"
   }
 ]

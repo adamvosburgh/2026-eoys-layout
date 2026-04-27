@@ -3,7 +3,7 @@ import multer from 'multer'
 import path from 'path'
 import fs from 'fs'
 import { v4 as uuidv4 } from 'uuid'
-import { getAllAssets, getAssetById, insertAsset, updateAsset } from '../db.js'
+import { getAllAssets, getAssetById, insertAsset, updateAsset, deleteAsset } from '../db.js'
 
 const router = express.Router()
 
@@ -13,8 +13,8 @@ fs.mkdirSync(STORAGE_PATH, { recursive: true })
 const upload = multer({
   dest: STORAGE_PATH,
   limits: { fileSize: 50 * 1024 * 1024 },
-  fileFilter: (req, file) => {
-    return ['.glb', '.obj'].includes(path.extname(file.originalname).toLowerCase())
+  fileFilter: (req, file, cb) => {
+    cb(null, ['.glb', '.obj'].includes(path.extname(file.originalname).toLowerCase()))
   },
 })
 
@@ -28,7 +28,7 @@ router.post('/assets', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' })
 
   const id = uuidv4()
-  const { name, description, category, boundingBox, isGlobal } = req.body
+  const { name, description, category, boundingBox, isGlobal, creator } = req.body
 
   // Rename to id.ext for predictable storage
   const ext = path.extname(req.file.originalname)
@@ -39,7 +39,7 @@ router.post('/assets', upload.single('file'), (req, res) => {
     id,
     name: name || req.file.originalname,
     description: description || '',
-    category: category || 'custom',
+    category: category || 'other',
     source: 'upload',
     file_path: finalPath,
     thumbnail_path: null,
@@ -47,9 +47,22 @@ router.post('/assets', upload.single('file'), (req, res) => {
     is_global: isGlobal === 'true' || isGlobal === '1' ? 1 : 0,
     approved: 0,
     scan_source: null,
+    creator: creator || null,
   })
 
   res.json({ id })
+})
+
+// Delete an asset (and its uploaded file, if any)
+router.delete('/assets/:id', (req, res) => {
+  const asset = getAssetById(req.params.id)
+  if (!asset) return res.status(404).json({ error: 'Not found' })
+  // Only delete the file if it was an admin upload (don't touch scan files in public/models)
+  if (asset.source === 'upload' && asset.file_path && fs.existsSync(asset.file_path)) {
+    try { fs.unlinkSync(asset.file_path) } catch (_) { /* ignore */ }
+  }
+  deleteAsset(req.params.id)
+  res.json({ ok: true })
 })
 
 // Approve / update asset fields

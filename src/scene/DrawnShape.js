@@ -63,12 +63,16 @@ export class DrawnShape {
 
     const colorRef = this.desc.surface === 'floor'
       ? this.colorRefs.drawnFloor : this.colorRefs.drawnWall
-    const mat = new THREE.MeshLambertMaterial({
+    const mat = new THREE.MeshStandardMaterial({
       color: colorRef.getHex(),
+      roughness: 0.7,
+      metalness: 0.0,
       transparent: isFlat,
       opacity: isFlat ? 0.5 : 1.0,
     })
     this._mesh = new THREE.Mesh(boxGeo, mat)
+    this._mesh.castShadow = !isFlat
+    this._mesh.receiveShadow = true
     this.group.add(this._mesh)
 
     const wireGeo = new THREE.EdgesGeometry(boxGeo)
@@ -123,23 +127,25 @@ export class DrawnShape {
 
   _refreshOutlineVisibility() {
     if (!this._wireframe) return
-    this._wireframe.material.opacity = (this.selected || this.hovered) ? 1 : 0
+    this._wireframe.material.opacity =
+      this.selected ? 1.0 :
+      this.hovered  ? 0.35 : 0
   }
 
   _buildExtrudeHandle() {
-    // Slightly larger + bolder so it's an obvious target. Sphere is easier to
-    // hit than a thin cone tip.
-    const headGeo = new THREE.SphereGeometry(0.04, 16, 12)
-    const stemGeo = new THREE.CylinderGeometry(0.008, 0.008, 0.06, 8)
+    // Small enough that clicks adjacent to the shape don't accidentally hit it,
+    // but large enough to grab. Sticks out ~3cm from the outer face.
+    const headGeo = new THREE.SphereGeometry(0.022, 16, 12)
+    const stemGeo = new THREE.CylinderGeometry(0.005, 0.005, 0.03, 8)
     stemGeo.rotateX(Math.PI / 2)
-    stemGeo.translate(0, 0, 0.03)
+    stemGeo.translate(0, 0, 0.015)
 
     const mat = new THREE.MeshBasicMaterial({
       color: ACCENT, depthTest: false, transparent: true, opacity: 1,
     })
     const head = new THREE.Mesh(headGeo, mat)
     const stem = new THREE.Mesh(stemGeo, mat)
-    head.position.set(0, 0, 0.06)
+    head.position.set(0, 0, 0.03)
 
     const handle = new THREE.Group()
     handle.add(stem); handle.add(head)
