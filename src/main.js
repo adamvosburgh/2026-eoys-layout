@@ -78,7 +78,7 @@ async function loadRoom(slug) {
   roomScene.focusRoom(meta)
 
   const { objectsMap, visibilityMap } = connect(slug)
-  objectsMap.observe(() => syncObjectsFromYjs())
+  objectsMap.observeDeep(() => syncObjectsFromYjs())
   syncObjectsFromYjs()
 
   visibilityMap.observe(e => {
