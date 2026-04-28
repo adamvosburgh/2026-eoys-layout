@@ -28,6 +28,7 @@ import { Tooltip } from './ui/Tooltip.js'
 import {
   connect, disconnect, getObjects, getVisibility, getAwareness,
   upsertObject, removeObject,
+  undo, redo, canUndo, canRedo,
 } from './collab/sync.js'
 
 // ─── Bootstrap ──────────────────────────────────────────────────────────────
@@ -106,6 +107,8 @@ function syncObjectsFromYjs() {
     const rot     = ymap.get('rotation') || [0, 0, 0]
     const label   = formatLabel(creator, name)
 
+    const locked = ymap.get('locked') === true
+
     if (liveObjects.has(id)) {
       const obj = liveObjects.get(id)
       if (obj instanceof DrawnShape) {
@@ -119,8 +122,10 @@ function syncObjectsFromYjs() {
         if (obj instanceof Projector) obj.setKeystone(ymap.get('keystone') || 0)
         labelManager.update(id, [pos[0], pos[1] + 0.3, pos[2]], label, desc)
       }
+      labelManager.setLocked(id, locked)
     } else {
       spawnFromYjs(id, type, ymap, pos, rot, name, desc, creator)
+      labelManager.setLocked(id, locked)
     }
   })
 
@@ -132,6 +137,7 @@ function syncObjectsFromYjs() {
     liveObjects.delete(id)
     labelManager.remove(id)
   }
+  updateUndoButtons()
 }
 
 function deleteObject(id) {
@@ -172,7 +178,7 @@ function spawnFromYjs(id, type, ymap, pos, rot, name, desc, creator = '') {
     const ks0 = ymap.get('keystone') || 0
     if (ks0) proj.setKeystone(ks0)
     liveObjects.set(id, proj)
-    labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], label, desc, deleteObject)
+    labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], label, desc, deleteObject, toggleLock)
     return
   }
 
@@ -184,7 +190,7 @@ function spawnFromYjs(id, type, ymap, pos, rot, name, desc, creator = '') {
     obj.setPosition(...pos)
     obj.setRotation(...rot)
     liveObjects.set(id, obj)
-    labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], label, desc, deleteObject)
+    labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], label, desc, deleteObject, toggleLock)
     if (id === pendingSelectId) {
       pendingSelectId = null
       if (selected) selected.deselect?.()
@@ -199,7 +205,7 @@ function spawnFromYjs(id, type, ymap, pos, rot, name, desc, creator = '') {
     const parentMesh = roomLoader.getAllRoomMeshes().find(m => m.name === g.parentName) || null
     const obj = new DrawnShape({ id, scene, desc: g, colorRefs: COLORS, parentMesh })
     liveObjects.set(id, obj)
-    labelManager.add(id, labelPosFor(obj), label, desc, deleteObject)
+    labelManager.add(id, labelPosFor(obj), label, desc, deleteObject, toggleLock)
     if (id === pendingSelectId) {
       pendingSelectId = null
       if (selected) selected.deselect?.()
@@ -211,7 +217,7 @@ function spawnFromYjs(id, type, ymap, pos, rot, name, desc, creator = '') {
 
   if (type === 'label') {
     liveObjects.set(id, { dispose: () => {} })
-    labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], label, desc, deleteObject)
+    labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], label, desc, deleteObject, toggleLock)
     return
   }
 
@@ -225,7 +231,7 @@ function spawnFromYjs(id, type, ymap, pos, rot, name, desc, creator = '') {
       obj.setPosition(...pos)
       obj.setRotation(...rot)
       liveObjects.set(id, obj)
-      labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], label, desc, deleteObject)
+      labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], label, desc, deleteObject, toggleLock)
       if (id === pendingSelectId) {
         pendingSelectId = null
         if (selected) selected.deselect?.()
@@ -401,6 +407,14 @@ function formatLabel(creator, name) {
   return creator ? `${creator} - ${name}` : (name || '')
 }
 
+function isLocked(id) {
+  return getObjects()?.get(id)?.get('locked') === true
+}
+
+function toggleLock(id) {
+  upsertObject(id, { locked: !isLocked(id) })
+}
+
 // ─── Interaction ─────────────────────────────────────────────────────────────
 
 let selected = null
@@ -481,7 +495,8 @@ renderer.domElement.addEventListener('pointerdown', e => {
 
   // Gizmo handles (only visible on selected object)
   const gizmo = selected?._gizmo
-  if (gizmo) {
+  const selectedId0 = selected?.group?.userData?.assetObjectId || selected?.id
+  if (gizmo && !isLocked(selectedId0)) {
     // Translate arrows (each axis has 2 arrow groups)
     const AXES = { x: new THREE.Vector3(1,0,0), y: new THREE.Vector3(0,1,0), z: new THREE.Vector3(0,0,1) }
     outer: for (const [axis, arrows] of Object.entries(gizmo.translateHandles)) {
@@ -536,7 +551,7 @@ renderer.domElement.addEventListener('pointerdown', e => {
   // Extrude handle?
   if (pick.hit.object.userData?.isExtrudeHandle) {
     const target = liveObjects.get(pick.hit.object.userData.targetId)
-    if (target instanceof DrawnShape) {
+    if (target instanceof DrawnShape && !isLocked(target.id)) {
       const t0 = projectRayOntoOutwardLine(target)
       if (t0 !== null) {
         extruding = {
@@ -561,16 +576,16 @@ renderer.domElement.addEventListener('pointerdown', e => {
     selected.showKeystoneUI(k => upsertObject(selected.id, { keystone: k }))
   }
 
-  dragging = true
-  controls.enabled = false
-
-  // Set up drag plane for non-drawn assets — always the floor TOP so existing
-  // placements that ended up at the underside snap up on first drag.
-  if (!(selected instanceof DrawnShape)) {
-    const y = roomLoader.floorTopY
-    dragSurface = { plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), y }
-  } else {
-    dragSurface = null
+  const selectedId1 = selected?.group?.userData?.assetObjectId || selected?.id
+  if (!isLocked(selectedId1)) {
+    dragging = true
+    controls.enabled = false
+    if (!(selected instanceof DrawnShape)) {
+      const y = roomLoader.floorTopY
+      dragSurface = { plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), y }
+    } else {
+      dragSurface = null
+    }
   }
 })
 
@@ -782,12 +797,21 @@ renderer.domElement.addEventListener('drop', e => {
 window.addEventListener('keydown', e => {
   const tag = (e.target.tagName || '').toLowerCase()
   if (tag === 'input' || tag === 'textarea') return
+
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+    e.preventDefault(); undo(); updateUndoButtons(); return
+  }
+  if ((e.ctrlKey || e.metaKey) && ((e.key === 'z' && e.shiftKey) || e.key === 'y')) {
+    e.preventDefault(); redo(); updateUndoButtons(); return
+  }
+
   if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
     const id = selected.group?.userData?.assetObjectId || selected.id
-    if (id) deleteObject(id)
+    if (id && !isLocked(id)) deleteObject(id)
   }
   if (e.key === 'Escape' && selected) {
     selected.deselect?.()
+    if (selected instanceof Projector) selected.hideKeystoneUI()
     selected = null
   }
 })
@@ -947,7 +971,7 @@ const createPanel = new CreatePanel(createPanelEl, ({ kind, primType, w, d, h, f
         })
         const obj = new AssetObject({ id, type: 'primitive', name, description, scene, mesh })
         liveObjects.set(id, obj)
-        labelManager.add(id, [0, 0.3, 0], formatLabel(creator, name), description, deleteObject)
+        labelManager.add(id, [0, 0.3, 0], formatLabel(creator, name), description, deleteObject, toggleLock)
       })
     })
   }
@@ -1194,6 +1218,39 @@ function buildDebugPanel() {
   document.body.appendChild(panel)
 }
 
+// ─── Undo / Redo buttons ─────────────────────────────────────────────────────
+
+let _btnUndo = null
+let _btnRedo = null
+
+function updateUndoButtons() {
+  if (!_btnUndo) return
+  _btnUndo.style.opacity = canUndo() ? '1' : '0.35'
+  _btnRedo.style.opacity = canRedo() ? '1' : '0.35'
+}
+
+function buildUndoButtons() {
+  const wrap = document.createElement('div')
+  wrap.style.cssText = 'position:fixed;bottom:16px;left:16px;z-index:100;display:flex;gap:6px;'
+
+  _btnUndo = document.createElement('button')
+  _btnUndo.className = 'btn'
+  _btnUndo.title = 'Undo (⌘Z)'
+  _btnUndo.textContent = '↩ Undo'
+  _btnUndo.addEventListener('click', () => { undo(); updateUndoButtons() })
+
+  _btnRedo = document.createElement('button')
+  _btnRedo.className = 'btn'
+  _btnRedo.title = 'Redo (⌘⇧Z)'
+  _btnRedo.textContent = '↪ Redo'
+  _btnRedo.addEventListener('click', () => { redo(); updateUndoButtons() })
+
+  wrap.appendChild(_btnUndo)
+  wrap.appendChild(_btnRedo)
+  document.body.appendChild(wrap)
+  updateUndoButtons()
+}
+
 // ─── Init ────────────────────────────────────────────────────────────────────
 
 async function init() {
@@ -1207,6 +1264,7 @@ async function init() {
   roomSwitcher.render(rooms)
   await loadRoom(rooms[0].slug)
   await assetPanel.refresh()
+  buildUndoButtons()
   if (ENABLE_DEBUG_PANEL) buildDebugPanel()
 }
 

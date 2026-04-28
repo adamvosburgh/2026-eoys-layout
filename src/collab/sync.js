@@ -7,6 +7,7 @@ let doc = null
 let provider = null
 let objectsMap = null
 let visibilityMap = null
+let undoManager = null
 
 export function getDoc() { return doc }
 export function getObjects() { return objectsMap }
@@ -28,6 +29,7 @@ export function connect(roomSlug) {
   })
 
   provider = new WebsocketProvider(WS_URL, roomSlug, doc)
+  undoManager = new Y.UndoManager(objectsMap, { captureTimeout: 500 })
 
   // Set a random awareness state for this client
   const colors = ['#ff6b6b', '#ffd93d', '#6bcb77', '#4d96ff', '#c77dff']
@@ -42,6 +44,8 @@ export function connect(roomSlug) {
 }
 
 export function disconnect() {
+  undoManager?.destroy()
+  undoManager = null
   if (provider) {
     provider.destroy()
     provider = null
@@ -53,6 +57,11 @@ export function disconnect() {
   objectsMap = null
   visibilityMap = null
 }
+
+export function undo()     { undoManager?.undo() }
+export function redo()     { undoManager?.redo() }
+export function canUndo()  { return (undoManager?.undoStack.length  ?? 0) > 0 }
+export function canRedo()  { return (undoManager?.redoStack.length ?? 0) > 0 }
 
 export function upsertObject(id, fields) {
   if (!objectsMap) return
