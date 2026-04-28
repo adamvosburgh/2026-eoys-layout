@@ -1,3 +1,7 @@
+// ─── Feature flags ───────────────────────────────────────────────────────────
+const ENABLE_DEBUG_PANEL = false
+const ENABLE_KEYSTONE    = false
+
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { v4 as uuidv4 } from 'uuid'
@@ -112,6 +116,7 @@ function syncObjectsFromYjs() {
       } else if (obj instanceof Projector || obj instanceof AssetObject) {
         obj.setPosition(...pos)
         obj.setRotation ? obj.setRotation(...rot) : obj.setRotationY(rot[1])
+        if (obj instanceof Projector) obj.setKeystone(ymap.get('keystone') || 0)
         labelManager.update(id, [pos[0], pos[1] + 0.3, pos[2]], label, desc)
       }
     } else {
@@ -164,6 +169,8 @@ function spawnFromYjs(id, type, ymap, pos, rot, name, desc, creator = '') {
     })
     proj.setPosition(...pos)
     proj.setRotationY(rot[1])
+    const ks0 = ymap.get('keystone') || 0
+    if (ks0) proj.setKeystone(ks0)
     liveObjects.set(id, proj)
     labelManager.add(id, [pos[0], pos[1] + 0.3, pos[2]], label, desc, deleteObject)
     return
@@ -517,7 +524,12 @@ renderer.domElement.addEventListener('pointerdown', e => {
 
   const pick = pickUserObject()
   if (!pick) {
-    if (selected) { hoveredGizmoHandle = null; selected.deselect?.(); selected = null }
+    if (selected) {
+      hoveredGizmoHandle = null
+      selected.deselect?.()
+      if (selected instanceof Projector) selected.hideKeystoneUI()
+      selected = null
+    }
     return
   }
 
@@ -541,9 +553,13 @@ renderer.domElement.addEventListener('pointerdown', e => {
   if (selected && selected !== pick.obj) {
     hoveredGizmoHandle = null
     selected.deselect?.()
+    if (selected instanceof Projector) selected.hideKeystoneUI()
   }
   selected = pick.obj
   selected.select?.()
+  if (ENABLE_KEYSTONE && selected instanceof Projector) {
+    selected.showKeystoneUI(k => upsertObject(selected.id, { keystone: k }))
+  }
 
   dragging = true
   controls.enabled = false
@@ -905,7 +921,7 @@ const sidebar = new Sidebar(
 
 const assetPanelEl = document.createElement('div')
 const assetPanel = new AssetPanel(assetPanelEl, placeAsset)
-sidebar.addPanel('assets', 'Assets', assetPanelEl)
+sidebar.addPanel('assets', 'Library', assetPanelEl)
 
 const createPanelEl = document.createElement('div')
 const createPanel = new CreatePanel(createPanelEl, ({ kind, primType, w, d, h, file }) => {
@@ -965,6 +981,7 @@ function updateFloorPlane() {
 }
 roomScene.onFrame(() => {
   labelManager.render()
+  if (selected instanceof Projector) selected.updateKeystonePos(camera, roomScene.renderer)
 
   const awareness = getAwareness()
   if (awareness) {
@@ -1190,7 +1207,7 @@ async function init() {
   roomSwitcher.render(rooms)
   await loadRoom(rooms[0].slug)
   await assetPanel.refresh()
-  buildDebugPanel()
+  if (ENABLE_DEBUG_PANEL) buildDebugPanel()
 }
 
 init()
