@@ -5,7 +5,7 @@ export class LabelManager {
   constructor(container, camera, scene) {
     this.camera = camera
     this.scene = scene
-    this._labels = new Map() // id → { label, div, text, xBtn, lockBtn, rawName, locked }
+    this._labels = new Map() // id → { label, div, text, xBtn, lockBtn, rawName, locked, isComment }
 
     this._renderer = new CSS2DRenderer()
     this._renderer.setSize(container.clientWidth, container.clientHeight)
@@ -16,14 +16,19 @@ export class LabelManager {
     container.appendChild(this._renderer.domElement)
 
     this.visible = true
+    this.commentsVisible = true
 
     window.addEventListener('resize', () => {
       this._renderer.setSize(container.clientWidth, container.clientHeight)
     })
   }
 
-  add(id, position, name, description = '', onDelete = null, onLock = null) {
+  // options: { background?: string, isComment?: boolean }
+  add(id, position, name, description = '', onDelete = null, onLock = null, options = {}) {
     if (this._labels.has(id)) this.remove(id)
+
+    const isComment = options.isComment || false
+    const bg = options.background || '#fff'
 
     const div = document.createElement('div')
     div.style.cssText = `
@@ -31,7 +36,7 @@ export class LabelManager {
       align-items: center;
       font-family: 'Roboto Mono', monospace;
       font-size: 10px;
-      background: #fff;
+      background: ${bg};
       border: 1px solid #000;
       white-space: nowrap;
       pointer-events: none;
@@ -45,7 +50,7 @@ export class LabelManager {
       user-select: none;
       font-size: 9px;
       line-height: 1.5;
-      border-right: 1px solid #ddd;
+      border-right: 1px solid rgba(0,0,0,0.15);
       flex-shrink: 0;
     `
 
@@ -83,8 +88,10 @@ export class LabelManager {
     label.layers.set(1)
     this.scene.add(label)
 
-    this._labels.set(id, { label, div, text, xBtn, lockBtn, rawName: name, locked: false })
-    label.visible = this.visible
+    const visible = isComment ? this.commentsVisible : this.visible
+    label.visible = visible
+
+    this._labels.set(id, { label, div, text, xBtn, lockBtn, rawName: name, locked: false, isComment })
   }
 
   update(id, position, name, description = '') {
@@ -100,18 +107,31 @@ export class LabelManager {
     if (!this._labels.has(id)) return
     const entry = this._labels.get(id)
     entry.locked = isLocked
-
-    // Update lock button icon
     if (entry.lockBtn) {
       entry.lockBtn.textContent = isLocked ? '🔒' : '🔓'
       entry.lockBtn.title = isLocked ? 'Unlock' : 'Lock'
     }
-
-    // Hide delete button when locked
     if (entry.xBtn) entry.xBtn.style.display = isLocked ? 'none' : ''
-
-    // Dim label when locked
     entry.div.style.opacity = isLocked ? '0.6' : '1'
+  }
+
+  setLabelVisible(id, visible) {
+    if (!this._labels.has(id)) return
+    this._labels.get(id).label.visible = visible
+  }
+
+  setVisible(v) {
+    this.visible = v
+    for (const { label, isComment } of this._labels.values()) {
+      if (!isComment) label.visible = v
+    }
+  }
+
+  setCommentsVisible(v) {
+    this.commentsVisible = v
+    for (const { label, isComment } of this._labels.values()) {
+      if (isComment) label.visible = v
+    }
   }
 
   remove(id) {
@@ -119,13 +139,6 @@ export class LabelManager {
     const { label } = this._labels.get(id)
     this.scene.remove(label)
     this._labels.delete(id)
-  }
-
-  setVisible(v) {
-    this.visible = v
-    for (const { label } of this._labels.values()) {
-      label.visible = v
-    }
   }
 
   render() {

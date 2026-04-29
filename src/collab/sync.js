@@ -26,6 +26,7 @@ export function connect(roomSlug) {
     if (!visibilityMap.has('grid')) visibilityMap.set('grid', true)
     if (!visibilityMap.has('labels')) visibilityMap.set('labels', true)
     if (!visibilityMap.has('objects')) visibilityMap.set('objects', true)
+    if (!visibilityMap.has('comments')) visibilityMap.set('comments', true)
   })
 
   provider = new WebsocketProvider(WS_URL, roomSlug, doc)

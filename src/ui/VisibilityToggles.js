@@ -8,7 +8,7 @@ export class VisibilityToggles {
   }
 
   _build() {
-    const keys = ['grid', 'labels', 'objects']
+    const keys = ['grid', 'labels', 'comments', 'objects']
     this.container.innerHTML = ''
     for (const key of keys) {
       const btn = document.createElement('button')

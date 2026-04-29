@@ -73,10 +73,12 @@ body {
 #visibility-toggles {
   position: fixed;
   bottom: 16px;
-  right: 120px;
-  z-index: 100;
+  right: 8px;
+  z-index: 101;
   display: flex;
+  flex-direction: column;
   gap: 6px;
+  align-items: flex-end;
 }
 
 .vis-btn {
@@ -127,7 +129,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 80px 8px 16px;
+  padding: 8px 8px 16px;
   gap: 10px;
   pointer-events: all;
 }

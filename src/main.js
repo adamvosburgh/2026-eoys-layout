@@ -22,6 +22,7 @@ import { Sidebar } from './ui/Sidebar.js'
 import { AssetPanel } from './ui/AssetPanel.js'
 import { CreatePanel } from './ui/CreatePanel.js'
 import { DrawPanel } from './ui/DrawPanel.js'
+import { CommentPanel } from './ui/CommentPanel.js'
 import { VisibilityToggles } from './ui/VisibilityToggles.js'
 import { Tooltip } from './ui/Tooltip.js'
 
@@ -77,6 +78,8 @@ async function loadRoom(slug) {
     .filter(m => !m.name.toLowerCase().startsWith('door_'))
   grid.build(gridSurfaces)
   roomScene.focusRoom(meta)
+  saveRoomState(slug)
+  restoreCamState(slug)
 
   const { objectsMap, visibilityMap } = connect(slug)
   objectsMap.observeDeep(() => syncObjectsFromYjs())
@@ -111,7 +114,9 @@ function syncObjectsFromYjs() {
 
     if (liveObjects.has(id)) {
       const obj = liveObjects.get(id)
-      if (obj instanceof DrawnShape) {
+      if (obj?.type === 'comment') {
+        labelManager.update(id, [pos[0], pos[1], pos[2]], creator || name, desc)
+      } else if (obj instanceof DrawnShape) {
         const g = ymap.get('geometry') || {}
         if (g.centerWorld) obj.setCenterWorld(...g.centerWorld)
         if ((g.extrude || 0) !== (obj.desc.extrude || 0)) obj.setExtrude(g.extrude || 0)
@@ -164,6 +169,20 @@ function labelPosFor(obj) {
 
 function spawnFromYjs(id, type, ymap, pos, rot, name, desc, creator = '') {
   const label = formatLabel(creator, name)
+
+  if (type === 'comment') {
+    const commentObj = { dispose: () => labelManager.remove(id), type: 'comment', id }
+    liveObjects.set(id, commentObj)
+    labelManager.add(
+      id, [pos[0], pos[1], pos[2]],
+      creator || name,
+      desc,
+      deleteObject,
+      null,
+      { background: '#ede7f6', isComment: true }
+    )
+    return
+  }
 
   if (type === 'projector') {
     const filePath = ymap.get('filePath')
@@ -358,6 +377,27 @@ function placeDrawnShape(geo) {
 
 // ─── Label dialog ────────────────────────────────────────────────────────────
 
+function saveRoomState(slug) {
+  sessionStorage.setItem('eoys_lastRoom', slug)
+}
+function saveCamState() {
+  sessionStorage.setItem('eoys_camState', JSON.stringify({
+    pos: camera.position.toArray(),
+    target: controls.target.toArray(),
+  }))
+}
+function restoreCamState(slug) {
+  try {
+    const lastRoom = sessionStorage.getItem('eoys_lastRoom')
+    const raw = sessionStorage.getItem('eoys_camState')
+    if (lastRoom !== slug || !raw) return
+    const { pos, target } = JSON.parse(raw)
+    camera.position.fromArray(pos)
+    controls.target.fromArray(target)
+    controls.update()
+  } catch (_) {}
+}
+
 function getSavedCreator() { return localStorage.getItem('eoys_creator') || '' }
 function setSavedCreator(v) { localStorage.setItem('eoys_creator', v) }
 
@@ -489,8 +529,33 @@ function pickUserObject() {
 
 renderer.domElement.addEventListener('pointerdown', e => {
   if (e.button !== 0) return
-  if (drawMode) return
   setMouse(e)
+
+  if (placingComment) {
+    raycaster.setFromCamera(mouse, camera)
+    const hits = raycaster.intersectObjects(roomLoader.getAllRoomMeshes(), false)
+    if (hits.length) {
+      const pt = hits[0].point
+      const id = uuidv4()
+      // get the pending comment data from the panel
+      const creator = commentPanelEl.querySelector('input')?.value?.trim() || ''
+      const description = commentPanelEl.querySelector('textarea')?.value?.trim() || ''
+      upsertObject(id, {
+        type: 'comment',
+        name: creator,
+        creator,
+        description,
+        position: [pt.x, pt.y + 0.05, pt.z],
+        rotation: [0, 0, 0],
+      })
+      commentPanel.reset()
+    }
+    placingComment = false
+    renderer.domElement.style.cursor = ''
+    return
+  }
+
+  if (drawMode) return
   raycaster.setFromCamera(mouse, camera)
 
   // Gizmo handles (only visible on selected object)
@@ -724,7 +789,9 @@ renderer.domElement.addEventListener('pointermove', e => {
     hoveredGizmoHandle = newGizmoHandle
   }
   const overGizmo = !!newGizmoHandle
-  if (overGizmo) {
+  if (placingComment) {
+    renderer.domElement.style.cursor = 'crosshair'
+  } else if (overGizmo) {
     renderer.domElement.style.cursor = 'crosshair'
   } else if (pick?.hit?.object?.userData?.isExtrudeHandle) {
     renderer.domElement.style.cursor = 'ns-resize'
@@ -763,6 +830,7 @@ renderer.domElement.addEventListener('pointerup', () => {
   dragSurface = null
   sizeLabel.hide()
   controls.enabled = !drawMode
+  saveCamState()
 })
 
 renderer.domElement.addEventListener('pointerleave', () => {
@@ -892,7 +960,11 @@ function enableDrawMode(mode) {
   if (drawMode === mode) return
   if (!drawTool) {
     drawTool = new DrawTool(scene, camera, renderer, () => roomLoader.getAllRoomMeshes())
-    drawTool.onShapeComplete = desc => placeDrawnShape(desc)
+    drawTool.onShapeComplete = desc => {
+      drawPanel.deactivate()
+      enableDrawMode(null)
+      placeDrawnShape(desc)
+    }
     drawTool.onSizeChange = (w, h, m, screenXY) => {
       if (w == null) sizeLabel.hide()
       else           sizeLabel.show(`${metersToFeetInches(w)} × ${metersToFeetInches(h)}`, screenXY)
@@ -982,11 +1054,21 @@ const drawPanelEl = document.createElement('div')
 const drawPanel = new DrawPanel(drawPanelEl, mode => enableDrawMode(mode))
 sidebar.addPanel('draw', 'Draw', drawPanelEl, () => drawPanel.deactivate())
 
+let placingComment = false
+
+const commentPanelEl = document.createElement('div')
+const commentPanel = new CommentPanel(commentPanelEl, ({ creator, description }) => {
+  placingComment = true
+  renderer.domElement.style.cursor = 'crosshair'
+})
+sidebar.addPanel('comment', 'Comment', commentPanelEl)
+
 const visToggles = new VisibilityToggles(
   document.getElementById('visibility-toggles'),
   {
     grid: v => grid.setVisible(v),
     labels: v => labelManager.setVisible(v),
+    comments: v => labelManager.setCommentsVisible(v),
     objects: v => {
       for (const obj of liveObjects.values()) {
         const group = obj.group
@@ -1247,6 +1329,67 @@ function buildUndoButtons() {
 
   wrap.appendChild(_btnUndo)
   wrap.appendChild(_btnRedo)
+
+  const btnHelp = document.createElement('button')
+  btnHelp.className = 'btn'
+  btnHelp.textContent = '? Help'
+  btnHelp.title = 'How to use'
+  btnHelp.addEventListener('click', () => {
+    const overlay = document.createElement('div')
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:500;display:flex;align-items:center;justify-content:center;'
+    const box = document.createElement('div')
+    box.style.cssText = 'background:#fff;border:1.5px solid #000;border-radius:16px;padding:28px 32px;max-width:480px;width:90%;font-family:Roboto Mono,monospace;font-size:12px;max-height:80vh;overflow-y:auto;'
+    box.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+        <span style="font-size:13px;text-transform:uppercase;letter-spacing:.1em;">How to use</span>
+        <span id="help-close" style="cursor:pointer;font-size:18px;line-height:1;">×</span>
+      </div>
+      <div style="display:grid;gap:16px;">
+        <div>
+          <div style="text-transform:uppercase;letter-spacing:.08em;font-size:10px;color:#888;margin-bottom:6px;">Navigation</div>
+          <div style="display:grid;gap:4px;line-height:1.6;">
+            <div><b>WASD / Arrows</b> — fly camera</div>
+            <div><b>Q / Space</b> — move up &nbsp; <b>E</b> — move down</div>
+            <div><b>Shift</b> — move faster</div>
+            <div><b>Left drag</b> — orbit &nbsp; <b>Right drag</b> — pan</div>
+            <div><b>Scroll</b> — zoom</div>
+          </div>
+        </div>
+        <div>
+          <div style="text-transform:uppercase;letter-spacing:.08em;font-size:10px;color:#888;margin-bottom:6px;">Objects</div>
+          <div style="display:grid;gap:4px;line-height:1.6;">
+            <div><b>Click</b> — select &nbsp; <b>Drag</b> — move on floor</div>
+            <div><b>Gizmo arrows</b> — move along axis</div>
+            <div><b>Gizmo rings</b> — rotate in 45° steps</div>
+            <div><b>Delete / Backspace</b> — delete selected</div>
+            <div><b>Escape</b> — deselect</div>
+          </div>
+        </div>
+        <div>
+          <div style="text-transform:uppercase;letter-spacing:.08em;font-size:10px;color:#888;margin-bottom:6px;">Draw</div>
+          <div style="line-height:1.6;">Open the Draw panel → choose Wall or Floor → click and drag on a surface. Drag the extrude handle to add depth.</div>
+        </div>
+        <div>
+          <div style="text-transform:uppercase;letter-spacing:.08em;font-size:10px;color:#888;margin-bottom:6px;">Comments</div>
+          <div style="line-height:1.6;">Open the Comment panel → fill in name + note → click Place → click anywhere in the scene.</div>
+        </div>
+        <div>
+          <div style="text-transform:uppercase;letter-spacing:.08em;font-size:10px;color:#888;margin-bottom:6px;">Lock</div>
+          <div style="line-height:1.6;">Click 🔓 in any label to lock an object. Locked objects can be selected but not moved or deleted.</div>
+        </div>
+        <div>
+          <div style="text-transform:uppercase;letter-spacing:.08em;font-size:10px;color:#888;margin-bottom:6px;">Undo / Redo</div>
+          <div style="line-height:1.6;"><b>⌘Z / Ctrl+Z</b> — undo &nbsp; <b>⌘⇧Z / Ctrl+Y</b> — redo</div>
+        </div>
+      </div>
+    `
+    overlay.appendChild(box)
+    document.body.appendChild(overlay)
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove() })
+    box.querySelector('#help-close').addEventListener('click', () => overlay.remove())
+  })
+  wrap.appendChild(btnHelp)
+
   document.body.appendChild(wrap)
   updateUndoButtons()
 }
