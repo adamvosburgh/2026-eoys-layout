@@ -61,5 +61,6 @@ Uploaded via `/admin`. Files land in `./storage/assets/` (volume-mounted). Uploa
 | What | Host path |
 |---|---|
 | SQLite DB | `./data/layout.db` |
+| Yjs layout state | `./data/yjs-db/` |
 | Uploaded assets | `./storage/assets/` |
 | Room models | `./public/models/` |
