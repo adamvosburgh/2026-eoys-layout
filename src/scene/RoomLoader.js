@@ -10,12 +10,20 @@ const WHITE_MAT = new THREE.MeshStandardMaterial({
   side:      THREE.FrontSide,
 })
 
+const CEILING_MAT = new THREE.MeshStandardMaterial({
+  color:     0xf2f2f2,
+  roughness: 0.85,
+  metalness: 0.0,
+  side:      THREE.FrontSide,
+})
+
 export class RoomLoader {
   constructor(scene) {
     this.scene = scene
     this._roomGroup = null
     this._wallMeshes = []
     this._floorMeshes = []
+    this._ceilingMeshes = []
     this._allMeshes = []
     this._originalMaterials = new WeakMap()  // mesh → polycam material
     this.useWhite = true
@@ -29,6 +37,7 @@ export class RoomLoader {
 
     this._wallMeshes = []
     this._floorMeshes = []
+    this._ceilingMeshes = []
     this._allMeshes = []
 
     const meshes = []
@@ -38,7 +47,15 @@ export class RoomLoader {
       if (!child.geometry.attributes.normal) {
         child.geometry.computeVertexNormals()
       }
-      if (this._isCeiling(child)) { child.visible = false; continue }
+
+      if (this._isCeiling(child)) {
+        this._originalMaterials.set(child, child.material)
+        child.material = CEILING_MAT
+        child.castShadow = false
+        child.receiveShadow = false
+        this._ceilingMeshes.push(child)
+        continue
+      }
 
       child.castShadow = true
       child.receiveShadow = true
@@ -72,6 +89,7 @@ export class RoomLoader {
   }
 
   _isCeiling(mesh) {
+    if (mesh.name.toLowerCase().startsWith('ceiling')) return true
     const normals = mesh.geometry.attributes.normal
     if (!normals) return false
     let sumY = 0
@@ -87,6 +105,7 @@ export class RoomLoader {
     }
     this._wallMeshes = []
     this._floorMeshes = []
+    this._ceilingMeshes = []
     this._allMeshes = []
   }
 
@@ -99,6 +118,17 @@ export class RoomLoader {
     for (const m of this._allMeshes) {
       const orig = this._originalMaterials.get(m)
       m.material = this.useWhite ? WHITE_MAT : (orig || m.material)
+    }
+    for (const m of this._ceilingMeshes) {
+      const orig = this._originalMaterials.get(m)
+      if (!this.useWhite && orig) {
+        orig.transparent = true
+        orig.opacity = 0.5
+        orig.depthWrite = false
+        m.material = orig
+      } else {
+        m.material = CEILING_MAT
+      }
     }
   }
 }

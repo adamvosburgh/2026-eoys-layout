@@ -7,7 +7,7 @@ import { prune } from '@gltf-transform/functions'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-const ROOM_PREFIXES = ['wall_', 'joint_', 'floor_', 'door_']
+const ROOM_PREFIXES = ['wall_', 'joint_', 'floor_', 'door_', 'ceiling_']
 
 function slugify(name) {
   return name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
@@ -37,9 +37,12 @@ function isRoomNode(name) {
 
 function collectNodes(node, roomNodes, scanNodes) {
   const name = node.getName() || ''
+  const hasMesh = !!node.getMesh()
   if (isRoomNode(name)) {
     roomNodes.push(node)
-  } else if (name) {
+  } else if (name && hasMesh) {
+    // Only mesh-bearing named nodes are scan objects. Skip transform-only
+    // container nodes (Blender exports a wrapper like "Node_67" at the root).
     scanNodes.push(node)
   }
   for (const child of node.listChildren()) {

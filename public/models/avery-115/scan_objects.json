@@ -1,83 +1,43 @@
 [
   {
-    "scanName": "chair_other_four_back_no0",
+    "scanName": "chair_single",
     "category": "chair",
     "boundingBox": {
       "min": [
-        -3.541821241378784,
+        -1.041975736618042,
         -1.239464282989502,
-        -0.2994823455810547
+        -0.6503067016601562
       ],
       "max": [
-        -2.9907565116882324,
-        -0.43947306275367737,
-        0.18439029157161713
+        -0.5770099759101868,
+        -0.40234309434890747,
+        -0.0934220626950264
       ]
     },
     "approved": false,
     "assetId": null,
     "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_other_four_back_no0.glb"
+    "scanFile": "public/models/avery-115/scans/chair_single.glb"
   },
   {
-    "scanName": "chair_dining_four_back_no0",
+    "scanName": "chair_stack",
     "category": "chair",
     "boundingBox": {
       "min": [
-        -1.6873133182525635,
-        -1.239464282989502,
-        1.3839771747589111
+        -1.041975736618042,
+        -1.4225831031799316,
+        -0.6503067016601562
       ],
       "max": [
-        -1.2311365604400635,
-        -0.43664711713790894,
-        1.9177910089492798
+        -0.5640361905097961,
+        -0.40234309434890747,
+        0.06270001083612442
       ]
     },
     "approved": false,
     "assetId": null,
     "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_dining_four_back_no0.glb"
-  },
-  {
-    "scanName": "chair_other_four_back_no1",
-    "category": "chair",
-    "boundingBox": {
-      "min": [
-        -0.6925640106201172,
-        -1.239464282989502,
-        -1.8949317932128906
-      ],
-      "max": [
-        -0.23235878348350525,
-        -0.46323806047439575,
-        -1.3661231994628906
-      ]
-    },
-    "approved": false,
-    "assetId": null,
-    "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_other_four_back_no1.glb"
-  },
-  {
-    "scanName": "chair_dining_four_back_no1",
-    "category": "chair",
-    "boundingBox": {
-      "min": [
-        1.0738317966461182,
-        -1.239464282989502,
-        -0.7486221194267273
-      ],
-      "max": [
-        1.7178747653961182,
-        -0.4836117625236511,
-        -0.11190324276685715
-      ]
-    },
-    "approved": false,
-    "assetId": null,
-    "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_dining_four_back_no1.glb"
+    "scanFile": "public/models/avery-115/scans/chair_stack.glb"
   },
   {
     "scanName": "refrigerator0",
@@ -100,24 +60,24 @@
     "scanFile": "public/models/avery-115/scans/refrigerator0.glb"
   },
   {
-    "scanName": "chair_dining_four_back_no2",
-    "category": "chair",
+    "scanName": "storage_cabinet_low10",
+    "category": "storagecabinet",
     "boundingBox": {
       "min": [
-        -1.976172924041748,
+        -1.5756593942642212,
         -1.239464282989502,
-        -1.898755431175232
+        3.226201057434082
       ],
       "max": [
-        -1.495093822479248,
-        -0.5224761366844177,
-        -1.3886239528656006
+        -0.7342868447303772,
+        -0.5615069270133972,
+        4.0488762855529785
       ]
     },
     "approved": false,
     "assetId": null,
     "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_dining_four_back_no2.glb"
+    "scanFile": "public/models/avery-115/scans/storage_cabinet_low10.glb"
   },
   {
     "scanName": "table_other_rect0",
@@ -140,246 +100,6 @@
     "scanFile": "public/models/avery-115/scans/table_other_rect0.glb"
   },
   {
-    "scanName": "chair_dining_four_back_no3",
-    "category": "chair",
-    "boundingBox": {
-      "min": [
-        1.153273105621338,
-        -1.239464282989502,
-        1.3200985193252563
-      ],
-      "max": [
-        1.7396990060806274,
-        -0.4403066039085388,
-        1.8536676168441772
-      ]
-    },
-    "approved": false,
-    "assetId": null,
-    "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_dining_four_back_no3.glb"
-  },
-  {
-    "scanName": "chair_dining_four_back_no4",
-    "category": "chair",
-    "boundingBox": {
-      "min": [
-        0.3414984345436096,
-        -1.239464282989502,
-        -0.666243851184845
-      ],
-      "max": [
-        0.838202714920044,
-        -0.41223177313804626,
-        -0.15684457123279572
-      ]
-    },
-    "approved": false,
-    "assetId": null,
-    "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_dining_four_back_no4.glb"
-  },
-  {
-    "scanName": "chair_dining_four_back_no5",
-    "category": "chair",
-    "boundingBox": {
-      "min": [
-        1.7179747819900513,
-        -1.239464282989502,
-        -0.7352661490440369
-      ],
-      "max": [
-        2.0062685012817383,
-        -0.4822785258293152,
-        -0.21207302808761597
-      ]
-    },
-    "approved": false,
-    "assetId": null,
-    "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_dining_four_back_no5.glb"
-  },
-  {
-    "scanName": "chair_dining_four_back_no6",
-    "category": "chair",
-    "boundingBox": {
-      "min": [
-        -0.33294445276260376,
-        -1.239464282989502,
-        1.2971233129501343
-      ],
-      "max": [
-        0.1951317936182022,
-        -0.46809226274490356,
-        1.8084759712219238
-      ]
-    },
-    "approved": false,
-    "assetId": null,
-    "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_dining_four_back_no6.glb"
-  },
-  {
-    "scanName": "chair_dining_four_back_no7",
-    "category": "chair",
-    "boundingBox": {
-      "min": [
-        -1.3472124338150024,
-        -1.239464282989502,
-        -1.8790024518966675
-      ],
-      "max": [
-        -0.8387895822525024,
-        -0.44290873408317566,
-        -1.3222399950027466
-      ]
-    },
-    "approved": false,
-    "assetId": null,
-    "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_dining_four_back_no7.glb"
-  },
-  {
-    "scanName": "chair_dining_four_back_no8",
-    "category": "chair",
-    "boundingBox": {
-      "min": [
-        -3.538456439971924,
-        -1.239464282989502,
-        1.1351531744003296
-      ],
-      "max": [
-        -3.068241596221924,
-        -0.4547434449195862,
-        1.5661835670471191
-      ]
-    },
-    "approved": false,
-    "assetId": null,
-    "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_dining_four_back_no8.glb"
-  },
-  {
-    "scanName": "chair_dining_four_back_no9",
-    "category": "chair",
-    "boundingBox": {
-      "min": [
-        -0.8294153809547424,
-        -1.239464282989502,
-        0.46561676263809204
-      ],
-      "max": [
-        -0.3150111138820648,
-        -0.46629366278648376,
-        1.0024819374084473
-      ]
-    },
-    "approved": false,
-    "assetId": null,
-    "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_dining_four_back_no9.glb"
-  },
-  {
-    "scanName": "chair_dining_four_back_no10",
-    "category": "chair",
-    "boundingBox": {
-      "min": [
-        0.10669022798538208,
-        -1.239464282989502,
-        2.6006717681884766
-      ],
-      "max": [
-        0.7810158729553223,
-        -0.4653037190437317,
-        3.2757019996643066
-      ]
-    },
-    "approved": false,
-    "assetId": null,
-    "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_dining_four_back_no10.glb"
-  },
-  {
-    "scanName": "chair_dining_four_back_no11",
-    "category": "chair",
-    "boundingBox": {
-      "min": [
-        -1.912344217300415,
-        -1.239464282989502,
-        0.4383256435394287
-      ],
-      "max": [
-        -1.393057107925415,
-        -0.4202865958213806,
-        1.0046097040176392
-      ]
-    },
-    "approved": false,
-    "assetId": null,
-    "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_dining_four_back_no11.glb"
-  },
-  {
-    "scanName": "chair_dining_four_back_no12",
-    "category": "chair",
-    "boundingBox": {
-      "min": [
-        -0.32911086082458496,
-        -1.239464282989502,
-        -0.6608285307884216
-      ],
-      "max": [
-        0.15550820529460907,
-        -0.427295982837677,
-        -0.10223480314016342
-      ]
-    },
-    "approved": false,
-    "assetId": null,
-    "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_dining_four_back_no12.glb"
-  },
-  {
-    "scanName": "chair_other_four_back_no2",
-    "category": "chair",
-    "boundingBox": {
-      "min": [
-        0.6563969254493713,
-        -1.239464282989502,
-        0.29307782649993896
-      ],
-      "max": [
-        1.2601568698883057,
-        -0.4748024344444275,
-        1.004015326499939
-      ]
-    },
-    "approved": false,
-    "assetId": null,
-    "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_other_four_back_no2.glb"
-  },
-  {
-    "scanName": "chair_dining_four_back_no13",
-    "category": "chair",
-    "boundingBox": {
-      "min": [
-        -1.704006314277649,
-        -1.239464282989502,
-        -0.6298518776893616
-      ],
-      "max": [
-        -1.207790493965149,
-        -0.4469665288925171,
-        -0.04513516649603844
-      ]
-    },
-    "approved": false,
-    "assetId": null,
-    "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_dining_four_back_no13.glb"
-  },
-  {
     "scanName": "television0",
     "category": "television",
     "boundingBox": {
@@ -398,105 +118,5 @@
     "assetId": null,
     "scanSource": "avery-115",
     "scanFile": "public/models/avery-115/scans/television0.glb"
-  },
-  {
-    "scanName": "chair_dining_four_back_no14",
-    "category": "chair",
-    "boundingBox": {
-      "min": [
-        -1.041975736618042,
-        -1.239464282989502,
-        -0.6503067016601562
-      ],
-      "max": [
-        -0.5770099759101868,
-        -0.40234309434890747,
-        -0.0934220626950264
-      ]
-    },
-    "approved": false,
-    "assetId": null,
-    "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_dining_four_back_no14.glb"
-  },
-  {
-    "scanName": "chair_dining_four_back_no15",
-    "category": "chair",
-    "boundingBox": {
-      "min": [
-        -1.0949283838272095,
-        -1.239464282989502,
-        1.3509490489959717
-      ],
-      "max": [
-        -0.6184878945350647,
-        -0.47119078040122986,
-        1.8906219005584717
-      ]
-    },
-    "approved": false,
-    "assetId": null,
-    "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_dining_four_back_no15.glb"
-  },
-  {
-    "scanName": "chair_dining_four_back_no16",
-    "category": "chair",
-    "boundingBox": {
-      "min": [
-        -0.7922171950340271,
-        -1.239464282989502,
-        2.8651809692382812
-      ],
-      "max": [
-        -0.3117484748363495,
-        -0.4748939871788025,
-        3.4381790161132812
-      ]
-    },
-    "approved": false,
-    "assetId": null,
-    "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_dining_four_back_no16.glb"
-  },
-  {
-    "scanName": "chair_other_four_back_no3",
-    "category": "chair",
-    "boundingBox": {
-      "min": [
-        -0.0778430700302124,
-        -1.239464282989502,
-        0.3511445224285126
-      ],
-      "max": [
-        0.656296968460083,
-        -0.504136323928833,
-        1.006662130355835
-      ]
-    },
-    "approved": false,
-    "assetId": null,
-    "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/chair_other_four_back_no3.glb"
-  },
-  {
-    "scanName": "storage_cabinet_low10",
-    "category": "storagecabinet",
-    "boundingBox": {
-      "min": [
-        -1.5756593942642212,
-        -1.239464282989502,
-        3.226201057434082
-      ],
-      "max": [
-        -0.7342868447303772,
-        -0.5615069270133972,
-        4.0488762855529785
-      ]
-    },
-    "approved": false,
-    "assetId": null,
-    "scanSource": "avery-115",
-    "scanFile": "public/models/avery-115/scans/storage_cabinet_low10.glb"
   }
 ]
