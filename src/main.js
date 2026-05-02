@@ -180,11 +180,19 @@ function labelPosFor(obj) {
 function commentLabelPos(ymap) {
   const parentId = ymap.get('parentId')
   if (parentId) {
-    const parent = liveObjects.get(parentId)
-    if (parent?.group) {
-      const p = parent.group.position
+    // Read from Yjs directly — avoids async GLTF timing issues where the
+    // Three.js group may not exist yet when syncObjectsFromYjs first runs.
+    const parentYmap = getObjects()?.get(parentId)
+    if (parentYmap) {
+      let px, py, pz
+      if (parentYmap.get('type') === 'drawn') {
+        const g = parentYmap.get('geometry') || {}
+        ;[px, py, pz] = g.centerWorld || [0, 0, 0]
+      } else {
+        ;[px, py, pz] = parentYmap.get('position') || [0, 0, 0]
+      }
       const off = ymap.get('parentOffset') || [0, 0, 0]
-      return [p.x + off[0], p.y + off[1], p.z + off[2]]
+      return [px + off[0], py + off[1], pz + off[2]]
     }
   }
   const pos = ymap.get('position') || [0, 0, 0]
