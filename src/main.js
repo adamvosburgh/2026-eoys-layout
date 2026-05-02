@@ -115,7 +115,7 @@ function syncObjectsFromYjs() {
     if (liveObjects.has(id)) {
       const obj = liveObjects.get(id)
       if (obj?.type === 'comment') {
-        labelManager.update(id, [pos[0], pos[1], pos[2]], creator || name, desc)
+        labelManager.update(id, commentLabelPos(ymap), creator || name, desc)
       } else if (obj instanceof DrawnShape) {
         const g = ymap.get('geometry') || {}
         if (g.centerWorld) obj.setCenterWorld(...g.centerWorld)
@@ -146,6 +146,16 @@ function syncObjectsFromYjs() {
 }
 
 function deleteObject(id) {
+  // Delete any comments parented to this object first
+  const om = getObjects()
+  if (om) {
+    const parented = []
+    om.forEach((ymap, cid) => {
+      if (ymap.get('type') === 'comment' && ymap.get('parentId') === id) parented.push(cid)
+    })
+    parented.forEach(cid => deleteObject(cid))
+  }
+
   const obj = liveObjects.get(id)
   if (obj) {
     if (obj === selected) selected = null
@@ -167,6 +177,31 @@ function labelPosFor(obj) {
   return [p.x, p.y + 0.3, p.z]
 }
 
+function commentLabelPos(ymap) {
+  const parentId = ymap.get('parentId')
+  if (parentId) {
+    const parent = liveObjects.get(parentId)
+    if (parent?.group) {
+      const p = parent.group.position
+      const off = ymap.get('parentOffset') || [0, 0, 0]
+      return [p.x + off[0], p.y + off[1], p.z + off[2]]
+    }
+  }
+  const pos = ymap.get('position') || [0, 0, 0]
+  return [pos[0], pos[1], pos[2]]
+}
+
+function updateParentedComments(parentId, groupPos) {
+  const om = getObjects()
+  if (!om) return
+  om.forEach((ymap, cid) => {
+    if (ymap.get('type') !== 'comment' || ymap.get('parentId') !== parentId) return
+    const off = ymap.get('parentOffset') || [0, 0, 0]
+    const pos = [groupPos.x + off[0], groupPos.y + off[1], groupPos.z + off[2]]
+    labelManager.update(cid, pos, ymap.get('creator') || ymap.get('name') || '', ymap.get('description') || '')
+  })
+}
+
 function spawnFromYjs(id, type, ymap, pos, rot, name, desc, creator = '') {
   const label = formatLabel(creator, name)
 
@@ -174,12 +209,16 @@ function spawnFromYjs(id, type, ymap, pos, rot, name, desc, creator = '') {
     const commentObj = { dispose: () => labelManager.remove(id), type: 'comment', id }
     liveObjects.set(id, commentObj)
     labelManager.add(
-      id, [pos[0], pos[1], pos[2]],
+      id, commentLabelPos(ymap),
       creator || name,
       desc,
       deleteObject,
       null,
-      { background: '#ede7f6', isComment: true }
+      {
+        background: '#ede7f6',
+        isComment: true,
+        onOpen: () => commentModal.show(creator || name, desc),
+      }
     )
     return
   }
@@ -533,21 +572,39 @@ renderer.domElement.addEventListener('pointerdown', e => {
 
   if (placingComment) {
     raycaster.setFromCamera(mouse, camera)
-    const hits = raycaster.intersectObjects(roomLoader.getAllRoomMeshes(), false)
-    if (hits.length) {
-      const pt = hits[0].point
+
+    // Find nearest hit across room meshes and live object groups
+    const roomHits = raycaster.intersectObjects(roomLoader.getAllRoomMeshes(), false)
+    let best = roomHits.length ? { point: roomHits[0].point, dist: roomHits[0].distance, parentId: null } : null
+
+    for (const [oid, obj] of liveObjects) {
+      if (!obj.group) continue
+      const hits = raycaster.intersectObject(obj.group, true)
+      if (!hits.length) continue
+      if (!best || hits[0].distance < best.dist)
+        best = { point: hits[0].point, dist: hits[0].distance, parentId: oid, parentGroup: obj.group }
+    }
+
+    if (best) {
+      const pt = best.point
       const id = uuidv4()
-      // get the pending comment data from the panel
       const creator = commentPanelEl.querySelector('input')?.value?.trim() || ''
       const description = commentPanelEl.querySelector('textarea')?.value?.trim() || ''
-      upsertObject(id, {
+      const fields = {
         type: 'comment',
         name: creator,
         creator,
         description,
         position: [pt.x, pt.y + 0.05, pt.z],
         rotation: [0, 0, 0],
-      })
+      }
+      if (best.parentId) {
+        const pp = best.parentGroup.position
+        fields.parentId = best.parentId
+        fields.parentOffset = [pt.x - pp.x, pt.y - pp.y, pt.z - pp.z]
+        fields.position = [pt.x, pt.y, pt.z]
+      }
+      upsertObject(id, fields)
       commentPanel.reset()
     }
     placingComment = false
@@ -694,7 +751,10 @@ renderer.domElement.addEventListener('pointermove', e => {
       const newPos = startPos.clone().addScaledVector(axisVec, snapped)
       obj.setPosition(newPos.x, newPos.y, newPos.z)
       const id = obj.group.userData.assetObjectId
-      if (id) labelManager.update(id, [newPos.x, newPos.y + 0.3, newPos.z], ymapLabel(id), '')
+      if (id) {
+        labelManager.update(id, [newPos.x, newPos.y + 0.3, newPos.z], ymapLabel(id), '')
+        updateParentedComments(id, newPos)
+      }
       const ft = (snapped / 0.3048)
       sizeLabel.show(`${axis.toUpperCase()}: ${ft >= 0 ? '+' : ''}${ft.toFixed(2)}'`, [e.clientX, e.clientY])
     }
@@ -743,6 +803,7 @@ renderer.domElement.addEventListener('pointermove', e => {
       if (cw[0] !== newCenter.x || cw[1] !== newCenter.y || cw[2] !== newCenter.z) {
         selected.setCenterWorld(newCenter.x, newCenter.y, newCenter.z)
         labelManager.update(selected.id, labelPosFor(selected), ymapLabel(selected.id), '')
+        updateParentedComments(selected.id, selected.group.position)
         upsertObject(selected.id, { geometry: selected.desc })
       }
     } else if (dragSurface) {
@@ -753,6 +814,7 @@ renderer.domElement.addEventListener('pointermove', e => {
           const pos = [snap(pt.x), dragSurface.y, snap(pt.z)]
           selected.setPosition?.(...pos)
           labelManager.update(id, [pos[0], pos[1] + 0.3, pos[2]], ymapLabel(id), '')
+          updateParentedComments(id, selected.group.position)
           upsertObject(id, { position: pos })
         }
       }
@@ -1101,6 +1163,64 @@ roomScene.onFrame(() => {
     }
   }
 })
+
+// ─── Comment detail modal ────────────────────────────────────────────────────
+
+const commentModal = (() => {
+  const backdrop = document.createElement('div')
+  backdrop.style.cssText = 'position:fixed;inset:0;z-index:999;display:none;'
+  document.body.appendChild(backdrop)
+
+  const panel = document.createElement('div')
+  panel.style.cssText = `
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 1000; display: none;
+    background: rgba(255,255,255,0.95); border: 1px solid #000;
+    font-family: 'Roboto Mono', monospace; font-size: 11px;
+    min-width: 280px; max-width: 420px; width: 90%;
+  `
+
+  const header = document.createElement('div')
+  header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid #000;'
+
+  const authorEl = document.createElement('span')
+  authorEl.style.cssText = 'font-size:10px;text-transform:uppercase;letter-spacing:.1em;'
+
+  const closeBtn = document.createElement('span')
+  closeBtn.textContent = '[ × ]'
+  closeBtn.style.cssText = 'font-size:10px;cursor:pointer;user-select:none;'
+  closeBtn.addEventListener('click', hide)
+
+  header.appendChild(authorEl)
+  header.appendChild(closeBtn)
+
+  const body = document.createElement('div')
+  body.style.cssText = 'padding:12px;white-space:pre-wrap;line-height:1.6;font-size:11px;max-height:60vh;overflow-y:auto;'
+
+  panel.appendChild(header)
+  panel.appendChild(body)
+  document.body.appendChild(panel)
+
+  backdrop.addEventListener('click', hide)
+
+  function hide() {
+    panel.style.display = 'none'
+    backdrop.style.display = 'none'
+  }
+
+  function show(author, message) {
+    authorEl.textContent = author
+    body.textContent = message || ''
+    backdrop.style.display = 'block'
+    panel.style.display = 'block'
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && panel.style.display !== 'none') hide()
+  })
+
+  return { show, hide }
+})()
 
 // ─── Debug panel ─────────────────────────────────────────────────────────────
 

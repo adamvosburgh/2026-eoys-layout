@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { GRID_UNIT } from './Snapping.js'
+import { buildGizmo, clearGizmo } from './_gizmoUtils.js'
 
 const ACCENT = 0x00ff00
 
@@ -31,6 +32,7 @@ export class DrawnShape {
     this._mesh = null
     this._wireframe = null
     this._extrudeHandle = null
+    this._gizmo = null
     this.selected = false
     this.hovered = false
 
@@ -94,11 +96,13 @@ export class DrawnShape {
   setCenterWorld(x, y, z) {
     this.desc.centerWorld = [x, y, z]
     this.group.position.set(x, y, z)
+    this._refreshGizmo()
   }
 
   setExtrude(extrude) {
     this.desc.extrude = Math.max(extrude, 0)
     this._rebuildMesh()
+    this._refreshGizmo()
   }
 
   worldOutwardDir() {
@@ -117,12 +121,25 @@ export class DrawnShape {
     this.selected = true
     this._refreshOutlineVisibility()
     if (!this._extrudeHandle) this._buildExtrudeHandle()
+    this._refreshGizmo()
   }
 
   deselect() {
     this.selected = false
     this._refreshOutlineVisibility()
     this._removeExtrudeHandle()
+    clearGizmo(this.scene, this._gizmo)
+    this._gizmo = null
+  }
+
+  _refreshGizmo() {
+    if (!this.selected) return
+    const box = new THREE.Box3().setFromObject(this.group)
+    if (this._gizmo) {
+      this._gizmo.update(box)
+    } else {
+      this._gizmo = buildGizmo(this.scene, this.id, box)
+    }
   }
 
   _refreshOutlineVisibility() {
