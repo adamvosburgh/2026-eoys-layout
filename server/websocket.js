@@ -1,8 +1,16 @@
 import WebSocket from 'ws'
-import * as Y from 'yjs'
+import { createRequire } from 'module'
 import { setPersistence, setupWSConnection } from 'y-websocket/bin/utils'
 import { LeveldbPersistence } from 'y-leveldb'
 import path from 'path'
+
+// Load Yjs via CommonJS so we share the SAME module instance with y-websocket
+// and y-leveldb (which both `require('yjs')`). Importing `yjs` as ESM resolves
+// to dist/yjs.mjs and creates a second Y.Doc constructor — Yjs warns
+// ("Yjs was already imported. This breaks constructor checks…") and silent
+// CRDT misbehavior can follow under load.
+const require = createRequire(import.meta.url)
+const Y = require('yjs')
 
 const DB_DIR = path.join(path.dirname(process.env.DB_PATH || './data/layout.db'), 'yjs-db')
 const ldb = new LeveldbPersistence(DB_DIR)

@@ -99,6 +99,13 @@ export class DrawnShape {
     this._refreshGizmo()
   }
 
+  // Aliases so the shared gizmo handlers in main.js (which target AssetObject /
+  // Projector) work on a DrawnShape too. Free Euler rotation would lift the
+  // rectangle off its surface, so setRotation is intentionally a no-op.
+  setPosition(x, y, z) { this.setCenterWorld(x, y, z) }
+  setRotation()        { /* surface-affixed; no free rotation */ }
+  _refreshSelectionBox() { this._refreshOutlineVisibility(); this._refreshGizmo() }
+
   setExtrude(extrude) {
     this.desc.extrude = Math.max(extrude, 0)
     this._rebuildMesh()

@@ -874,33 +874,40 @@ renderer.domElement.addEventListener('pointermove', e => {
 })
 
 renderer.domElement.addEventListener('pointerup', () => {
-  if (translating) {
-    const { obj } = translating
-    const id = obj.group.userData.assetObjectId
-    if (id) {
-      const p = obj.group.position
-      upsertObject(id, { position: [p.x, p.y, p.z] })
+  try {
+    if (translating) {
+      const { obj } = translating
+      const id = obj.group?.userData?.assetObjectId || obj.id
+      if (id) {
+        if (obj instanceof DrawnShape) {
+          upsertObject(id, { geometry: obj.desc })
+        } else {
+          const p = obj.group.position
+          upsertObject(id, { position: [p.x, p.y, p.z] })
+        }
+      }
+      obj._refreshSelectionBox?.()
     }
-    obj._refreshSelectionBox()
+    if (rotating) {
+      const { obj } = rotating
+      const id = obj.group?.userData?.assetObjectId || obj.id
+      if (id && !(obj instanceof DrawnShape)) {
+        upsertObject(id, {
+          rotation: [obj.group.rotation.x, obj.group.rotation.y, obj.group.rotation.z],
+        })
+      }
+      obj._refreshSelectionBox?.()
+    }
+  } finally {
     translating = null
-  }
-  if (rotating) {
-    const { obj } = rotating
-    const id = obj.group.userData.assetObjectId
-    if (id) {
-      upsertObject(id, {
-        rotation: [obj.group.rotation.x, obj.group.rotation.y, obj.group.rotation.z],
-      })
-    }
-    obj._refreshSelectionBox()
     rotating = null
+    dragging = false
+    extruding = null
+    dragSurface = null
+    sizeLabel.hide()
+    controls.enabled = !drawMode
+    saveCamState()
   }
-  dragging = false
-  extruding = null
-  dragSurface = null
-  sizeLabel.hide()
-  controls.enabled = !drawMode
-  saveCamState()
 })
 
 renderer.domElement.addEventListener('pointerleave', () => {
