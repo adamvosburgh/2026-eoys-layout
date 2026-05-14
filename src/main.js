@@ -25,6 +25,7 @@ import { DrawPanel } from './ui/DrawPanel.js'
 import { CommentPanel } from './ui/CommentPanel.js'
 import { VisibilityToggles } from './ui/VisibilityToggles.js'
 import { Tooltip } from './ui/Tooltip.js'
+import { INFO_TITLE, INFO_HTML } from './ui/infoContent.js'
 
 import {
   connect, disconnect, getObjects, getVisibility, getAwareness,
@@ -1524,6 +1525,34 @@ function buildUndoButtons() {
     box.querySelector('#help-close').addEventListener('click', () => overlay.remove())
   })
   wrap.appendChild(btnHelp)
+
+  function openInfoOverlay() {
+    const overlay = document.createElement('div')
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:500;display:flex;align-items:center;justify-content:center;'
+    const box = document.createElement('div')
+    box.style.cssText = 'background:#fff;border:1.5px solid #000;border-radius:16px;padding:28px 32px;max-width:480px;width:90%;font-family:Roboto Mono,monospace;font-size:12px;max-height:80vh;overflow-y:auto;'
+    box.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+        <span style="font-size:13px;text-transform:uppercase;letter-spacing:.1em;">${INFO_TITLE}</span>
+        <span id="info-close" style="cursor:pointer;font-size:18px;line-height:1;">×</span>
+      </div>
+      ${INFO_HTML}
+    `
+    overlay.appendChild(box)
+    document.body.appendChild(overlay)
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove() })
+    box.querySelector('#info-close').addEventListener('click', () => overlay.remove())
+  }
+
+  const btnInfo = document.createElement('button')
+  btnInfo.className = 'btn'
+  btnInfo.textContent = '! Info'
+  btnInfo.title = 'About this tool'
+  btnInfo.addEventListener('click', openInfoOverlay)
+  wrap.appendChild(btnInfo)
+
+  // Show info overlay automatically on first load
+  openInfoOverlay()
 
   document.body.appendChild(wrap)
   updateUndoButtons()
