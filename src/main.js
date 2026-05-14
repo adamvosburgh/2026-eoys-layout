@@ -288,6 +288,35 @@ function spawnFromYjs(id, type, ymap, pos, rot, name, desc, creator = '') {
     return
   }
 
+  if (type === 'outlet') {
+    const filePath = ymap.get('filePath')
+    if (filePath) {
+      gltfLoader.loadAsync(filePath).then(gltf => {
+        const mesh = gltf.scene
+        // Center the mesh on all axes so the group origin sits at its center.
+        // Wall-snapping places the group ON the wall surface and the mesh
+        // protrudes outward symmetrically.
+        const meshBox = new THREE.Box3().setFromObject(mesh)
+        const c = new THREE.Vector3()
+        meshBox.getCenter(c)
+        mesh.position.sub(c)
+        mesh.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true } })
+        const obj = new AssetObject({ id, type, name, description: desc, scene, mesh })
+        obj.setPosition(...pos)
+        obj.setRotation(...rot)
+        liveObjects.set(id, obj)
+        labelManager.add(id, [pos[0], pos[1] + 0.15, pos[2]], label, desc, deleteObject, toggleLock)
+        if (id === pendingSelectId) {
+          pendingSelectId = null
+          if (selected) selected.deselect?.()
+          selected = obj
+          obj.select()
+        }
+      })
+    }
+    return
+  }
+
   if (type === 'asset') {
     const filePath = ymap.get('filePath')
     const bbox     = ymap.get('boundingBox')
@@ -368,15 +397,16 @@ function placeAsset(asset, worldPos) {
     try { bbox = JSON.parse(asset.bounding_box) } catch (_) { /* ignore */ }
   }
 
-  // If a world position was passed (e.g. from drag-and-drop), use that;
-  // otherwise place where the camera target is (what the user is looking at).
-  // Y always = floor TOP surface so the bottom of the asset rests on it.
-  const floorY = roomLoader.floorTopY
+  const isOutlet = asset.category === 'outlet'
   const t = worldPos || controls.target
-  const pos = [snap(t.x), floorY, snap(t.z)]
+  // Outlets snap to walls — don't force Y to the floor.
+  const floorY = roomLoader.floorTopY
+  const pos = isOutlet
+    ? [t.x, t.y, t.z]
+    : [snap(t.x), floorY, snap(t.z)]
 
   upsertObject(id, {
-    type: asset.category === 'projector' ? 'projector' : 'asset',
+    type: asset.category === 'projector' ? 'projector' : asset.category === 'outlet' ? 'outlet' : 'asset',
     assetId: asset.id,
     filePath: asset.file_path ? `/api/asset-file/${asset.id}` : null,
     boundingBox: bbox,
@@ -711,7 +741,10 @@ renderer.domElement.addEventListener('pointerdown', e => {
   if (!isLocked(selectedId1)) {
     dragging = true
     controls.enabled = false
-    if (!(selected instanceof DrawnShape)) {
+    const selType = getObjects()?.get(selectedId1)?.get('type')
+    if (selType === 'outlet') {
+      dragSurface = { wallSnap: true }
+    } else if (!(selected instanceof DrawnShape)) {
       const y = roomLoader.floorTopY
       dragSurface = { plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), y }
     } else {
@@ -814,6 +847,25 @@ renderer.domElement.addEventListener('pointermove', e => {
         labelManager.update(selected.id, labelPosFor(selected), ymapLabel(selected.id), '')
         updateParentedComments(selected.id, selected.group.position)
         upsertObject(selected.id, { geometry: selected.desc })
+      }
+    } else if (dragSurface?.wallSnap) {
+      const id = selected.group?.userData?.assetObjectId
+      if (id) {
+        const wallHits = raycaster.intersectObjects(roomLoader.getWallMeshes(), false)
+        if (wallHits.length) {
+          const hit = wallHits[0]
+          // Sit the outlet on the wall surface: offset slightly along face normal
+          const n = hit.normal.clone()
+          const pt = hit.point.clone().addScaledVector(n, 0.01)
+          const pos = [pt.x, pt.y, pt.z]
+          // Orient to face outward from the wall (rotate around Y only)
+          const rot = [0, Math.atan2(n.x, n.z), 0]
+          selected.setPosition?.(...pos)
+          selected.setRotation?.(...rot)
+          labelManager.update(id, [pos[0], pos[1] + 0.15, pos[2]], ymapLabel(id), '')
+          updateParentedComments(id, selected.group.position)
+          upsertObject(id, { position: pos, rotation: rot })
+        }
       }
     } else if (dragSurface) {
       const pt = new THREE.Vector3()
