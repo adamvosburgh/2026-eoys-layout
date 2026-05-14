@@ -388,7 +388,7 @@ function makePrimitiveMesh(primType, w, d, h) {
 
 // ─── Placing Objects ─────────────────────────────────────────────────────────
 
-function placeAsset(asset, worldPos) {
+function placeAsset(asset, worldPos, worldRot) {
   const id = uuidv4()
   pendingSelectId = id
 
@@ -414,7 +414,7 @@ function placeAsset(asset, worldPos) {
     name: asset.name,
     description: asset.description || '',
     position: pos,
-    rotation: [0, 0, 0],
+    rotation: worldRot || [0, 0, 0],
     createdBy: getAwareness()?.clientID?.toString() || '',
   })
 }
@@ -981,9 +981,22 @@ renderer.domElement.addEventListener('drop', e => {
   try { asset = JSON.parse(json) } catch (_) { return }
   if (!asset) return
 
-  // Raycast from drop point onto the floor plane to choose where to spawn
   setMouse(e)
   raycaster.setFromCamera(mouse, camera)
+
+  // Outlets spawn on the wall they were dropped onto.
+  if (asset.category === 'outlet') {
+    const wallHits = raycaster.intersectObjects(roomLoader.getWallMeshes(), false)
+    if (wallHits.length) {
+      const hit = wallHits[0]
+      const n = hit.normal.clone()
+      const pt = hit.point.clone().addScaledVector(n, 0.01)
+      const rot = [0, Math.atan2(n.x, n.z), 0]
+      placeAsset(asset, pt, rot)
+      return
+    }
+  }
+
   const pt = new THREE.Vector3()
   if (raycaster.ray.intersectPlane(floorPlane, pt)) {
     placeAsset(asset, pt)

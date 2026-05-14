@@ -34,7 +34,13 @@ export class AssetObject {
   }
 
   setPosition(x, y, z) {
-    this.group.position.set(snap(x), y, snap(z))
+    // Outlets ride on wall surfaces — snapping X/Z to a floor grid would
+    // pull them off the wall.
+    if (this.type === 'outlet') {
+      this.group.position.set(x, y, z)
+    } else {
+      this.group.position.set(snap(x), y, snap(z))
+    }
     this._refreshSelectionBox()
   }
 
