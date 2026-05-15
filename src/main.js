@@ -547,6 +547,7 @@ function setGizmoOpacity(handle, opacity) {
   handle.traverse(c => { if (c.isMesh) { c.material.opacity = opacity } })
 }
 let dragSurface = null      // for non-drawn assets: { plane, y } for floor-plane drag
+let turntable = null        // active 360° camera spin: { centerX, centerZ, headY, startAngle, elapsed, duration, lastTime }
 const raycaster = new THREE.Raycaster()
 raycaster.layers.enableAll()
 const mouse = new THREE.Vector2()
@@ -591,6 +592,67 @@ function wrapAngle(a) {
   return a
 }
 
+// ─── Turntable (360° camera spin from room center) ──────────────────────────
+
+const TURNTABLE_DURATION = 12.0  // seconds for a full rotation
+const TURNTABLE_EYE_HEIGHT = 1.7 // meters above floor
+
+function startTurntable() {
+  const floors = roomLoader.getFloorMeshes()
+  if (!floors.length) return
+  const box = new THREE.Box3()
+  for (const m of floors) box.expandByObject(m)
+  const c = new THREE.Vector3()
+  box.getCenter(c)
+
+  const fwd = new THREE.Vector3()
+  camera.getWorldDirection(fwd)
+  fwd.y = 0
+  if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1)
+  fwd.normalize()
+
+  controls.enabled = false
+  turntable = {
+    centerX: c.x,
+    centerZ: c.z,
+    headY: roomLoader.floorTopY + TURNTABLE_EYE_HEIGHT,
+    startAngle: Math.atan2(fwd.x, fwd.z),
+    elapsed: 0,
+    duration: TURNTABLE_DURATION,
+    lastTime: performance.now(),
+  }
+  updatePlayButton()
+}
+
+function stopTurntable() {
+  if (!turntable) return
+  turntable = null
+  controls.enabled = true
+  // Re-anchor OrbitControls so its target sits in front of the camera.
+  const fwd = new THREE.Vector3()
+  camera.getWorldDirection(fwd)
+  controls.target.copy(camera.position).addScaledVector(fwd, 2.0)
+  controls.update()
+  updatePlayButton()
+}
+
+function tickTurntable() {
+  if (!turntable) return
+  const now = performance.now()
+  const dt = Math.min((now - turntable.lastTime) / 1000, 0.1)
+  turntable.lastTime = now
+  turntable.elapsed += dt
+  const t = turntable.elapsed / turntable.duration
+  const angle = turntable.startAngle + t * Math.PI * 2
+  camera.position.set(turntable.centerX, turntable.headY, turntable.centerZ)
+  camera.lookAt(
+    turntable.centerX + Math.sin(angle),
+    turntable.headY,
+    turntable.centerZ + Math.cos(angle),
+  )
+  if (t >= 1) stopTurntable()
+}
+
 /** Raycast all selectable user objects (groups), return closest hit (with obj). */
 function pickUserObject() {
   let best = null
@@ -607,6 +669,7 @@ function pickUserObject() {
 
 renderer.domElement.addEventListener('pointerdown', e => {
   if (e.button !== 0) return
+  if (turntable) { stopTurntable(); return }
   setMouse(e)
 
   if (placingComment) {
@@ -1229,6 +1292,7 @@ function updateFloorPlane() {
   floorPlane.set(new THREE.Vector3(0, 1, 0), -y)
 }
 roomScene.onFrame(() => {
+  tickTurntable()
   labelManager.render()
   if (selected instanceof Projector) selected.updateKeystonePos(camera, roomScene.renderer)
 
@@ -1505,6 +1569,7 @@ function buildDebugPanel() {
 
 let _btnUndo = null
 let _btnRedo = null
+let _btnPlay = null
 
 function updateUndoButtons() {
   if (!_btnUndo) return
@@ -1512,9 +1577,25 @@ function updateUndoButtons() {
   _btnRedo.style.opacity = canRedo() ? '1' : '0.35'
 }
 
+function updatePlayButton() {
+  if (!_btnPlay) return
+  _btnPlay.textContent = turntable ? '■ Stop' : '▶ Play'
+  _btnPlay.title = turntable ? 'Stop turntable' : 'Turntable view (360°)'
+}
+
 function buildUndoButtons() {
   const wrap = document.createElement('div')
   wrap.style.cssText = 'position:fixed;bottom:16px;left:16px;z-index:100;display:flex;gap:6px;'
+
+  _btnPlay = document.createElement('button')
+  _btnPlay.className = 'btn'
+  _btnPlay.title = 'Turntable view (360°)'
+  _btnPlay.textContent = '▶ Play'
+  _btnPlay.addEventListener('click', () => {
+    if (turntable) stopTurntable()
+    else startTurntable()
+  })
+  wrap.appendChild(_btnPlay)
 
   _btnUndo = document.createElement('button')
   _btnUndo.className = 'btn'
