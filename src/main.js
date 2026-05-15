@@ -594,7 +594,7 @@ function wrapAngle(a) {
 
 // ─── Turntable (360° camera spin from room center) ──────────────────────────
 
-const TURNTABLE_DURATION = 12.0  // seconds for a full rotation
+const TURNTABLE_DURATION = 24.0  // seconds for a full rotation
 const TURNTABLE_EYE_HEIGHT = 1.7 // meters above floor
 
 function startTurntable() {
@@ -650,7 +650,6 @@ function tickTurntable() {
     turntable.headY,
     turntable.centerZ + Math.cos(angle),
   )
-  if (t >= 1) stopTurntable()
 }
 
 /** Raycast all selectable user objects (groups), return closest hit (with obj). */
